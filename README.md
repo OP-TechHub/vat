@@ -71,7 +71,9 @@ on conflict (company_id, user_id) do update set role = excluded.role;
 
 Roles: `viewer` (read only, edit controls hidden), `editor` (uploads, inline edits, return entry), `admin` (also manages members). The database enforces this through RLS; the UI only mirrors it.
 
-After the first admin exists, further members are added from the app's **Members** tab: create their login under **Authentication → Users** (or let them sign up if you enable that), then enter the same email and a role on the Members tab. The app cannot send invitation emails itself because it never holds the service-role key.
+After the first admin exists, further members are added from the app's **Members** tab. The person first needs a login: either they use **Create account** on the sign-in page, or you create it under **Authentication → Users**. Then an admin enters the same email and a role on the Members tab. A login on its own shows no companies and no data.
+
+Self-registration needs **Authentication → Providers → Email → Allow new users to sign up** turned on (the default). With **Confirm email** on, new users get a confirmation link before they can sign in; turn it off for an internal app where you don't want that step. To stop strangers registering at all, turn sign-ups off and create logins in the dashboard instead.
 
 ## 4. Run locally
 
