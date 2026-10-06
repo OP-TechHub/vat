@@ -1,0 +1,356 @@
+<title>VAT Input Claims Register</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a ledger-style workbench. Slim header with tax-year picker, tab strip, then one full-width working table per tab. */
+:root{
+  --bg:#f3f5f6; --surface:#ffffff; --ink:#16242b; --muted:#5d6f78; --line:#d6dde1;
+  --accent:#0e6b74; --accent-ink:#ffffff; --accent-soft:#e0f0f1;
+  --good:#1c7a48; --good-soft:#e1f3e8; --warn:#9a5b00; --warn-soft:#fbefd9; --bad:#b3372f; --bad-soft:#fbe6e3;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10181c; --surface:#18232a; --ink:#e6eef1; --muted:#93a6af; --line:#2c3b44;
+  --accent:#4fc0c9; --accent-ink:#07282c; --accent-soft:#17383d;
+  --good:#6bd19a; --good-soft:#173527; --warn:#f0b859; --warn-soft:#3a2d12; --bad:#f08b82; --bad-soft:#3d1d1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10181c; --surface:#18232a; --ink:#e6eef1; --muted:#93a6af; --line:#2c3b44;
+  --accent:#4fc0c9; --accent-ink:#07282c; --accent-soft:#17383d;
+  --good:#6bd19a; --good-soft:#173527; --warn:#f0b859; --warn-soft:#3a2d12; --bad:#f08b82; --bad-soft:#3d1d1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+.wrap{max-width:1280px;margin:0 auto;padding-inline:16px;padding-block:20px 48px;display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
+h1{font-size:22px;font-weight:600;margin:0;text-wrap:balance}
+h2{font-size:15px;font-weight:600;margin:0}
+.sub{color:var(--muted);font-size:13px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line)}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;font:inherit;color:var(--muted);cursor:pointer}
+.tabs button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:6px 12px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:500}
+.btn:disabled{opacity:.5;cursor:default}
+select,input[type=text],input[type=search],input[type=number]{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:6px 8px;min-width:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bar label{color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:2px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.scroll{overflow-x:auto;max-height:70vh;overflow-y:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+td.wrapc{white-space:normal;min-width:180px}
+th{position:sticky;top:0;background:var(--surface);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;z-index:1}
+.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+tr.total td{font-weight:600;border-top:2px solid var(--line)}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:500}
+.pill.good{background:var(--good-soft);color:var(--good)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.info{background:var(--accent-soft);color:var(--accent)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px}
+.stat b{display:block;font-family:var(--mono);font-size:19px;font-weight:500;margin-top:2px}
+.stat span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.grid2{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:800px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.form{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:6px 10px;align-items:center}
+.form input{text-align:right;font-family:var(--mono);width:100%}
+.form .sec{grid-column:1/-1;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin-top:8px}
+.note{font-size:13px;color:var(--muted)}
+.msg{padding:8px 12px;border-radius:4px;background:var(--accent-soft);color:var(--ink);font-size:13px}
+.msg.err{background:var(--bad-soft);color:var(--bad)}
+.diff0{color:var(--muted)} .diffx{color:var(--bad);font-weight:600}
+td select{padding:2px 4px;font-size:12px}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>VAT Input Claims Register</h1>
+      <div class="sub" id="status">Loading records…</div>
+    </div>
+    <div class="bar">
+      <label>Tax year <select id="taxYear"></select></label>
+      <button class="btn" id="exportBtn" hidden>Export to Excel</button>
+    </div>
+  </header>
+  <div class="tabs" role="tablist" id="tabs">
+    <button role="tab" data-tab="summary">Summary</button>
+    <button role="tab" data-tab="invoices">Invoice listing</button>
+    <button role="tab" data-tab="schedule">IRD input schedule</button>
+    <button role="tab" data-tab="returns">VAT reconciliation</button>
+  </div>
+  <div id="flash" hidden></div>
+  <main id="view"></main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(function(){
+const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const S={ledger:{},schedule:{},returns:{},year:2026,tab:"summary",canWrite:true,loaded:false,
+  f:{month:"",status:"",orig:"",q:""},schMonth:"",retMonth:"",pending:null};
+let db=null,downloads=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=n=>(n==null||isNaN(n))?"":Number(n).toLocaleString("en-LK",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt0=n=>(n==null||n===""||isNaN(n))?"":Math.round(Number(n)).toLocaleString("en-LK");
+const months=()=>{const a=[];for(let i=0;i<12;i++){const m=(3+i)%12,y=S.year+(i>=9?1:0);a.push(y+"-"+String(m+1).padStart(2,"0"))}return a};
+const mLabel=k=>k?MN[+k.slice(5)-1]+" "+k.slice(0,4):"";
+const mShort=k=>k?MN[+k.slice(5)-1]:"";
+const norm=s=>String(s==null?"":s).trim().toUpperCase().replace(/\s+/g,"");
+const sum=(a,f)=>a.reduce((t,x)=>t+(+f(x)||0),0);
+
+/* ---- claim matching: schedule Tax Invoice No = ledger External Document No ---- */
+function compute(){
+  const idx={};
+  for(const k of Object.keys(S.schedule).sort()) for(const r of S.schedule[k].rows||[]){const n=norm(r.inv); if(n&&!idx[n]) idx[n]=k}
+  const rows=[];
+  for(const k of Object.keys(S.ledger).sort()) for(const r of S.ledger[k].rows||[]){
+    const auto=idx[norm(r.ext)]||"";
+    const cm=r.claim==="none"?"":(r.claim||auto);
+    rows.push(Object.assign({},r,{pm:k,cm,auto,claimed:!!cm}));
+  }
+  const ext={}; rows.forEach(r=>{const n=norm(r.ext); if(n) ext[n]=r});
+  return {rows,ext};
+}
+const inYear=k=>months().includes(k);
+
+/* ---- rendering ---- */
+function flash(t,err){const f=$("flash");f.hidden=!t;f.className="msg"+(err?" err":"");f.textContent=t||""}
+function render(){
+  document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===S.tab));
+  if(!S.loaded){$("view").innerHTML='<div class="panel note">Loading records…</div>';return}
+  const C=compute();
+  ({summary:vSummary,invoices:vInvoices,schedule:vSchedule,returns:vReturns})[S.tab](C);
+}
+function monthOpts(sel,blank){return (blank?'<option value="">'+blank+'</option>':'')+months().map(k=>'<option value="'+k+'"'+(k===sel?" selected":"")+'>'+mLabel(k)+'</option>').join("")}
+
+function vSummary(C){
+  const rows=C.rows.filter(r=>inYear(r.pm)), ms=months();
+  const cl=rows.filter(r=>r.claimed), nc=rows.filter(r=>!r.claimed);
+  const noOrig=nc.filter(r=>r.orig!=="Yes");
+  let h='<div class="stats">'+
+   stat("Ledger input VAT",fmt(sum(rows,r=>r.amt)),rows.length+" invoices")+
+   stat("Claimed",fmt(sum(cl,r=>r.amt)),cl.length+" invoices")+
+   stat("Not claimed",fmt(sum(nc,r=>r.amt)),nc.length+" invoices")+
+   stat("Unclaimed, original held",fmt(sum(nc.filter(r=>r.orig==="Yes"),r=>r.amt)),nc.filter(r=>r.orig==="Yes").length+" ready to claim")+
+   '</div>';
+  // month-wise by posting date
+  h+='<div class="panel"><h2>Month-wise summary by posting date</h2><div class="scroll"><table><thead><tr><th>Month</th><th class="num">Invoices</th><th class="num">Total input VAT</th><th class="num">Claimed inv.</th><th class="num">Claimed amount</th><th class="num">Unclaimed inv.</th><th class="num">Unclaimed amount</th><th class="num">Original held</th></tr></thead><tbody>';
+  const T=[0,0,0,0,0,0,0];
+  ms.forEach(k=>{const a=rows.filter(r=>r.pm===k); if(!a.length) return;
+    const c=a.filter(r=>r.claimed),u=a.filter(r=>!r.claimed),o=a.filter(r=>r.orig==="Yes").length;
+    const v=[a.length,sum(a,r=>r.amt),c.length,sum(c,r=>r.amt),u.length,sum(u,r=>r.amt),o]; v.forEach((x,i)=>T[i]+=x);
+    h+='<tr><td>'+mLabel(k)+'</td>'+v.map((x,i)=>'<td class="num">'+(i%2&&i<6?fmt(x):x)+'</td>').join("")+'</tr>'});
+  h+='<tr class="total"><td>Total</td>'+T.map((x,i)=>'<td class="num">'+(i%2&&i<6?fmt(x):x)+'</td>').join("")+'</tr></tbody></table></div></div>';
+  // return vs ledger
+  h+='<div class="panel"><h2>VAT return against ledger</h2><div class="note">VAT return is the input schedule total for the return month. Claimed from ledger is the ledger value of invoices matched to that month’s schedule.</div><div class="scroll"><table><thead><tr><th>Return month</th><th class="num">Schedule lines</th><th class="num">VAT return (schedule)</th><th class="num">Local purchases tax per return</th><th class="num">Ledger balance posted</th><th class="num">Claimed from ledger</th><th class="num">Schedule not in ledger</th></tr></thead><tbody>';
+  const U=[0,0,0,0,0,0];
+  ms.forEach(k=>{const s=(S.schedule[k]||{}).rows||[], a=rows.filter(r=>r.pm===k); if(!s.length&&!a.length&&!S.returns[k]) return;
+    const sv=sum(s,r=>r.vat), rt=S.returns[k]?+S.returns[k].localTax||0:null, lb=sum(a,r=>r.amt), cf=sum(C.rows.filter(r=>r.cm===k),r=>r.amt);
+    const un=sum(s.filter(r=>!C.ext[norm(r.inv)]),r=>r.vat);
+    [s.length,sv,rt||0,lb,cf,un].forEach((x,i)=>U[i]+=x);
+    h+='<tr><td>'+mLabel(k)+'</td><td class="num">'+s.length+'</td><td class="num">'+fmt(sv)+'</td><td class="num">'+(rt==null?'<span class="diff0">not entered</span>':fmt(rt))+'</td><td class="num">'+fmt(lb)+'</td><td class="num">'+fmt(cf)+'</td><td class="num">'+fmt(un)+'</td></tr>'});
+  h+='<tr class="total"><td>Total</td><td class="num">'+U[0]+'</td>'+U.slice(1).map(x=>'<td class="num">'+fmt(x)+'</td>').join("")+'</tr></tbody></table></div></div>';
+  // matrix
+  const cms=ms.filter(k=>rows.some(r=>r.cm===k));
+  h+='<div class="panel"><h2>Posting month by claimed month</h2><div class="scroll"><table><thead><tr><th>Posting month</th>'+cms.map(k=>'<th class="num">Claimed '+mShort(k)+'</th>').join("")+'<th class="num">Not claimed</th><th class="num">Total</th></tr></thead><tbody>';
+  ms.forEach(k=>{const a=rows.filter(r=>r.pm===k); if(!a.length) return;
+    h+='<tr><td>'+mLabel(k)+'</td>'+cms.map(c=>{const v=sum(a.filter(r=>r.cm===c),r=>r.amt);return '<td class="num">'+(v?fmt(v):"")+'</td>'}).join("")+'<td class="num">'+fmt(sum(a.filter(r=>!r.claimed),r=>r.amt))+'</td><td class="num">'+fmt(sum(a,r=>r.amt))+'</td></tr>'});
+  h+='<tr class="total"><td>Total</td>'+cms.map(c=>'<td class="num">'+fmt(sum(rows.filter(r=>r.cm===c),r=>r.amt))+'</td>').join("")+'<td class="num">'+fmt(sum(nc,r=>r.amt))+'</td><td class="num">'+fmt(sum(rows,r=>r.amt))+'</td></tr></tbody></table></div></div>';
+  $("view").innerHTML='<div style="display:flex;flex-direction:column;gap:16px">'+h+'</div>';
+}
+const stat=(l,v,s)=>'<div class="stat"><span>'+l+'</span><b>'+v+'</b><div class="note">'+s+'</div></div>';
+
+function uploadPanel(kind,sel){
+  const p=S.pending&&S.pending.kind===kind?S.pending:null;
+  let h='<div class="panel"><h2>'+(kind==="ledger"?"Upload a month’s ledger invoice list":"Upload a month’s IRD input schedule")+'</h2>'+
+  '<div class="note">'+(kind==="ledger"?"Excel or CSV with columns Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY). Only rows posted in the chosen month are taken. Original-invoice marks already entered are kept.":"Excel or CSV with columns Serial No, Invoice Date, Tax Invoice No, Supplier’s TIN, Name of the Supplier, Description, Value of purchase, VAT Amount. If the file has a Month column, only the chosen month’s rows are taken.")+'</div>'+
+  '<div class="bar"><label>Month <select id="upMonth">'+monthOpts(sel)+'</select></label><button class="btn" id="upTpl" style="align-self:flex-end"'+(downloads?"":" hidden")+'>Download template</button><label>File <input type="file" id="upFile" accept=".xlsx,.xls,.csv"></label></div>';
+  if(p) h+='<div class="msg">'+esc(p.text)+'</div><div class="bar"><button class="btn primary" id="upSave">Save '+p.rows.length+' rows to '+mLabel(p.month)+'</button><button class="btn" id="upCancel">Cancel</button></div>';
+  return h+'</div>';
+}
+function bindUpload(kind){
+  const f=$("upFile"); if(!f) return;
+  const tp=$("upTpl"); if(tp) tp.onclick=async()=>{
+    const led=kind==="ledger", wb=XLSX.utils.book_new();
+    const head=led?["Invoice No.","Posting Date","Vendor Name","External Document No.","Description","Amount (LCY)","Source Currency Amount"]:["Month","Serial No","Invoice Date","Tax Invoice No","Supplier's TIN","Name of the Supplier","Description","Value of purchase","VAT Amount"];
+    const ws=XLSX.utils.aoa_to_sheet([head]); ws["!cols"]=head.map(h=>({wch:Math.max(14,h.length+4)}));
+    XLSX.utils.book_append_sheet(wb,ws,led?"Invoice Listing":"IRD Input Schedule");
+    try{await downloads.save({filename:(led?"Ledger invoice list":"IRD input schedule")+" template.xlsx",data:XLSX.write(wb,{type:"array",bookType:"xlsx"})})}
+    catch(e){if(e&&e.code!=="declined") flash("Template download failed: "+((e&&e.message)||"unavailable"),true)}};
+  if(!S.canWrite){f.disabled=true}
+  f.onchange=()=>{const file=f.files[0]; if(!file) return; const month=$("upMonth").value;
+    const rd=new FileReader(); rd.onload=()=>{try{S.pending=parseUpload(kind,month,rd.result)}catch(e){S.pending=null;flash(e.message,true)} render()}; rd.readAsArrayBuffer(file)};
+  const sv=$("upSave"); if(sv) sv.onclick=async()=>{const p=S.pending; sv.disabled=true;
+    if(await save(kind,p.month,{rows:p.rows})){flash("Saved "+p.rows.length+" rows to "+mLabel(p.month)+"."); if(kind==="schedule")S.schMonth=p.month; else S.f.month=p.month} S.pending=null; render()};
+  const cn=$("upCancel"); if(cn) cn.onclick=()=>{S.pending=null;render()};
+}
+
+function vInvoices(C){
+  const F=S.f; let rows=C.rows.filter(r=>inYear(r.pm));
+  if(F.month) rows=rows.filter(r=>r.pm===F.month);
+  if(F.status) rows=rows.filter(r=>F.status==="c"?r.claimed:!r.claimed);
+  if(F.orig) rows=rows.filter(r=>F.orig==="y"?r.orig==="Yes":F.orig==="n"?r.orig==="No":!r.orig);
+  if(F.q){const q=F.q.toLowerCase(); rows=rows.filter(r=>(r.no+" "+r.vendor+" "+r.ext+" "+r.desc).toLowerCase().includes(q))}
+  const ms=months();
+  let h=uploadPanel("ledger",F.month||ms[0])+
+  '<div class="bar"><label>Posting month <select id="fMonth">'+monthOpts(F.month,"All months")+'</select></label>'+
+  '<label>Status <select id="fStatus"><option value="">All</option><option value="c"'+(F.status==="c"?" selected":"")+'>Claimed</option><option value="n"'+(F.status==="n"?" selected":"")+'>Not claimed</option></select></label>'+
+  '<label>Original VAT invoice <select id="fOrig"><option value="">All</option><option value="y"'+(F.orig==="y"?" selected":"")+'>Available</option><option value="n"'+(F.orig==="n"?" selected":"")+'>Not available</option><option value="b"'+(F.orig==="b"?" selected":"")+'>Not marked</option></select></label>'+
+  '<label>Search <input type="search" id="fQ" value="'+esc(F.q)+'" placeholder="Invoice, vendor, document no."></label>'+
+  '<span class="note">'+rows.length+' invoices · '+fmt(sum(rows,r=>r.amt))+'</span></div>'+
+  '<div class="scroll"><table><thead><tr><th>Invoice no.</th><th>Posting date</th><th>Vendor</th><th>External doc. no.</th><th>Description</th><th class="num">Amount (LCY)</th><th>Original VAT invoice</th><th>Status</th><th>Claimed month</th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="9" class="note">No invoices match. Upload a month’s ledger list above to add them.</td></tr>';
+  rows.forEach(r=>{
+    h+='<tr><td>'+esc(r.no)+'</td><td>'+esc(r.date)+'</td><td class="wrapc">'+esc(r.vendor)+'</td><td>'+esc(r.ext)+'</td><td class="wrapc">'+esc(r.desc)+'</td><td class="num">'+fmt(r.amt)+'</td>'+
+    '<td><select data-orig="'+esc(r.no)+'" data-pm="'+r.pm+'"'+(S.canWrite?"":" disabled")+'><option value="">Not marked</option><option'+(r.orig==="Yes"?" selected":"")+'>Yes</option><option'+(r.orig==="No"?" selected":"")+'>No</option></select></td>'+
+    '<td><span class="pill '+(r.claimed?"good":"warn")+'">'+(r.claimed?"Claimed":"Not claimed")+'</span></td>'+
+    '<td><select data-claim="'+esc(r.no)+'" data-pm="'+r.pm+'"'+(S.canWrite?"":" disabled")+'><option value="">'+(r.auto?"Auto: "+mLabel(r.auto):"Auto: none")+'</option>'+ms.map(k=>'<option value="'+k+'"'+(r.claim===k?" selected":"")+'>'+mLabel(k)+' (manual)</option>').join("")+'<option value="none"'+(r.claim==="none"?" selected":"")+'>Not claimed (manual)</option></select></td></tr>'});
+  h+='</tbody></table></div><div class="note">Status is set automatically when an invoice’s external document number appears as a tax invoice number on a month’s IRD input schedule. Use the claimed-month list to override where the numbers are written differently.</div>';
+  $("view").innerHTML='<div style="display:flex;flex-direction:column;gap:16px">'+h+'</div>';
+  bindUpload("ledger");
+  $("fMonth").onchange=e=>{F.month=e.target.value;render()}; $("fStatus").onchange=e=>{F.status=e.target.value;render()}; $("fOrig").onchange=e=>{F.orig=e.target.value;render()};
+  $("fQ").onchange=e=>{F.q=e.target.value;render()};
+  $("view").querySelectorAll("select[data-orig],select[data-claim]").forEach(s=>s.onchange=async()=>{
+    const pm=s.dataset.pm, key=s.dataset.orig!=null?"orig":"claim", no=s.dataset[key];
+    const doc={rows:S.ledger[pm].rows.map(r=>r.no===no?Object.assign({},r,{[key]:s.value}):r)};
+    await save("ledger",pm,doc); render()});
+}
+
+function vSchedule(C){
+  const ms=months(); if(!S.schMonth||!ms.includes(S.schMonth)) S.schMonth=ms.filter(k=>S.schedule[k]).pop()||ms[0];
+  const k=S.schMonth, rows=(S.schedule[k]||{}).rows||[];
+  const matched=rows.filter(r=>C.ext[norm(r.inv)]);
+  let h=uploadPanel("schedule",k)+
+  '<div class="bar"><label>Return month <select id="sMonth">'+monthOpts(k)+'</select></label><span class="note">'+rows.length+' lines · purchases '+fmt(sum(rows,r=>r.value))+' · VAT '+fmt(sum(rows,r=>r.vat))+' · '+matched.length+' matched to ledger invoices</span></div>'+
+  '<div class="scroll"><table><thead><tr><th>Serial</th><th>Invoice date</th><th>Tax invoice no.</th><th>Supplier TIN</th><th>Supplier</th><th>Description</th><th class="num">Value of purchase</th><th class="num">VAT amount</th><th>Ledger invoice</th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="9" class="note">No schedule saved for '+mLabel(k)+'. Upload the month’s input schedule above.</td></tr>';
+  rows.forEach(r=>{const m=C.ext[norm(r.inv)];
+    h+='<tr><td>'+esc(r.sn)+'</td><td>'+esc(r.date)+'</td><td>'+esc(r.inv)+'</td><td>'+esc(r.tin)+'</td><td class="wrapc">'+esc(r.supplier)+'</td><td class="wrapc">'+esc(r.desc)+'</td><td class="num">'+fmt(r.value)+'</td><td class="num">'+fmt(r.vat)+'</td><td>'+(m?'<span class="pill good">'+esc(m.no)+'</span>':'<span class="pill info">Not in ledger list</span>')+'</td></tr>'});
+  if(rows.length) h+='<tr class="total"><td colspan="6">Total</td><td class="num">'+fmt(sum(rows,r=>r.value))+'</td><td class="num">'+fmt(sum(rows,r=>r.vat))+'</td><td></td></tr>';
+  h+='</tbody></table></div>';
+  $("view").innerHTML='<div style="display:flex;flex-direction:column;gap:16px">'+h+'</div>';
+  bindUpload("schedule"); $("sMonth").onchange=e=>{S.schMonth=e.target.value;S.pending=null;render()};
+}
+
+const RF=[["sec","Supplies"],["zeroRated","Zero rated supplies, goods (D)"],["exempt","Exempt supplies (E)"],
+ ["sec","Input tax"],["importsValue","Imports, value (H)"],["importsDeferred","Imports, deferred tax (4)"],["importsUpfront","Imports, upfront tax (5)"],["localValue","Local purchases, value (I)"],["localTax","Local purchases, tax (6)"],["disallowed","Disallowable input tax (8)"],["bf","Brought forward input tax (10)"],
+ ["sec","As per ledger"],["ledgerExports","Exports as per ledger"],["ledgerLocalSales","Local sales as per ledger"],["ledgerImports","Imports VAT as per ledger"]];
+function retCalc(k,C){const r=S.returns[k]; if(!r) return null; const n=x=>+r[x]||0;
+  const t7=n("importsDeferred")+n("importsUpfront")+n("localTax"), t9=t7-n("disallowed");
+  const sup=n("zeroRated")+n("exempt"), sched=sum((S.schedule[k]||{}).rows||[],x=>x.vat);
+  return {t7,t9,avail:t9+n("bf"),sugg:sup?t7*n("exempt")/sup:0,sched,dSched:n("localTax")-sched,dExp:n("zeroRated")-n("ledgerExports"),dLoc:n("exempt")-n("ledgerLocalSales"),dImp:n("importsDeferred")-n("ledgerImports"),
+    ledgerClaimed:sum(C.rows.filter(x=>x.cm===k),x=>x.amt)}}
+function vReturns(C){
+  const ms=months(); if(!S.retMonth||!ms.includes(S.retMonth)) S.retMonth=ms.filter(k=>S.returns[k]).pop()||ms[0];
+  const k=S.retMonth, r=S.returns[k]||{};
+  let form='<div class="panel"><h2>Return details</h2><div class="bar"><label>Return month <select id="rMonth">'+monthOpts(k)+'</select></label></div><form id="rForm" class="form">';
+  RF.forEach(([id,l])=>{form+=id==="sec"?'<div class="sec">'+l+'</div>':'<label for="r_'+id+'">'+l+'</label><input type="number" step="any" id="r_'+id+'" value="'+(r[id]==null?"":r[id])+'"'+(S.canWrite?"":" disabled")+'>'});
+  form+='</form><div class="bar"><button class="btn primary" id="rSave"'+(S.canWrite?"":" disabled")+'>Save '+mLabel(k)+' return</button></div></div>';
+  const have=ms.filter(m=>S.returns[m]), calc={}; have.forEach(m=>calc[m]=retCalc(m,C));
+  const line=(l,f,cls)=>'<tr'+(cls==="t"?' class="total"':'')+'><td>'+l+'</td>'+have.map(m=>{const v=f(m);return '<td class="num'+(cls==="d"?(Math.abs(v)<1?" diff0":" diffx"):"")+'">'+fmt0(v)+'</td>'}).join("")+'</tr>';
+  const raw=id=>m=>+S.returns[m][id]||0;
+  let tb='<div class="panel"><h2>Reconciliation by return month</h2>';
+  if(!have.length) tb+='<div class="note">No return saved yet for this tax year. Enter the figures on the left and save.</div>';
+  else tb+='<div class="scroll"><table><thead><tr><th>Line</th>'+have.map(m=>'<th class="num">'+mLabel(m)+'</th>').join("")+'</tr></thead><tbody>'+
+    line("Zero rated supplies, goods (D)",raw("zeroRated"))+line("Exempt supplies (E)",raw("exempt"))+line("Imports, value (H)",raw("importsValue"))+line("Imports, deferred tax (4)",raw("importsDeferred"))+line("Imports, upfront tax (5)",raw("importsUpfront"))+line("Local purchases, value (I)",raw("localValue"))+line("Local purchases, tax (6)",raw("localTax"))+
+    line("Total input tax (4+5+6)",m=>calc[m].t7,"t")+line("Disallowable input tax (8)",raw("disallowed"))+line("Disallowable by exempt ratio, calculated",m=>calc[m].sugg)+line("Allowable input tax (7−8)",m=>calc[m].t9,"t")+line("Brought forward input tax (10)",raw("bf"))+line("Input tax available (9+10)",m=>calc[m].avail,"t")+
+    line("Exports as per ledger",raw("ledgerExports"))+line("Difference to zero rated supplies",m=>calc[m].dExp,"d")+line("Local sales as per ledger",raw("ledgerLocalSales"))+line("Difference to exempt supplies",m=>calc[m].dLoc,"d")+line("Imports VAT as per ledger",raw("ledgerImports"))+line("Difference to deferred tax",m=>calc[m].dImp,"d")+
+    line("Input schedule VAT total",m=>calc[m].sched)+line("Difference to local purchases tax",m=>calc[m].dSched,"d")+line("Claimed from ledger invoices",m=>calc[m].ledgerClaimed)+
+    '</tbody></table></div><div class="note">Differences of less than one rupee are treated as agreed. Output tax and the refund or payable cages are not held here.</div>';
+  tb+='</div>';
+  $("view").innerHTML='<div class="grid2">'+form+tb+'</div>';
+  $("rMonth").onchange=e=>{S.retMonth=e.target.value;render()};
+  $("rForm").onsubmit=e=>e.preventDefault();
+  $("rSave").onclick=async()=>{const d={}; RF.forEach(([id])=>{if(id!=="sec"){const v=$("r_"+id).value; d[id]=v===""?0:+v}});
+    if(await save("returns",k,d)) flash("Saved the "+mLabel(k)+" return."); render()};
+}
+
+/* ---- upload parsing ---- */
+function xlDate(v){
+  if(typeof v==="number"){const d=new Date(Date.UTC(1899,11,30)+Math.round(v)*864e5);return d.toISOString().slice(0,10)}
+  const s=String(v||"").trim(); let m;
+  if((m=s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/))) return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
+  if((m=s.match(/^(\d{1,2})[-./](\d{1,2})[-./](\d{4})/))) return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  return s;
+}
+function xlText(v){ if(typeof v==="number"&&v>40000&&v<60000){const d=xlDate(v);return d.slice(8)+"."+d.slice(5,7)+"."+d.slice(0,4)} return String(v==null?"":v).trim()}
+const num=v=>{const n=typeof v==="number"?v:parseFloat(String(v||"").replace(/,/g,""));return isNaN(n)?0:Math.round(n*100)/100};
+function parseUpload(kind,month,buf){
+  const wb=XLSX.read(buf,{type:"array"});
+  const want=kind==="ledger"?/invoice listing/i:/input/i;
+  const name=wb.SheetNames.find(n=>want.test(n))||wb.SheetNames[0];
+  const A=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:true,defval:""});
+  const key=kind==="ledger"?/posting date/i:/tax invoice no/i;
+  const hi=A.slice(0,15).findIndex(r=>r.some(c=>key.test(String(c))));
+  if(hi<0) throw new Error("Could not find the "+(kind==="ledger"?"Posting Date":"Tax Invoice No")+" column heading in sheet “"+name+"”. Check the file has the expected headings.");
+  const H=A[hi].map(c=>String(c).toLowerCase().replace(/\s+/g," ").trim());
+  const col=(...res)=>{for(const re of res){const i=H.findIndex(h=>re.test(h)); if(i>=0) return i} return -1};
+  const body=A.slice(hi+1), rows=[]; let skipped=0;
+  if(kind==="ledger"){
+    const c={no:col(/^invoice no/,/^document no/),date:col(/posting date/),vendor:col(/vendor/),ext:col(/external doc/),desc:col(/^description/),amt:col(/^amount \(lcy\)/,/^amount/),src:col(/source currency/)};
+    if(c.no<0||c.amt<0) throw new Error("The file needs Invoice No. (or Document No.) and Amount (LCY) columns.");
+    const old={}; ((S.ledger[month]||{}).rows||[]).forEach(r=>old[r.no]=r);
+    const by={};
+    body.forEach(r=>{const no=String(r[c.no]||"").trim(); if(!no) return; const d=xlDate(r[c.date]);
+      if(d.slice(0,7)!==month){skipped++;return}
+      if(by[no]){by[no].amt=num(by[no].amt+num(r[c.amt]));return}
+      const o=old[no]||{};
+      by[no]={no,date:d,vendor:c.vendor<0?"":String(r[c.vendor]).trim(),ext:c.ext<0?"":String(r[c.ext]).trim(),desc:c.desc<0?"":String(r[c.desc]).trim(),amt:num(r[c.amt]),src:c.src<0?0:num(r[c.src]),orig:o.orig||"",claim:o.claim||""}; rows.push(by[no])});
+  }else{
+    const c={m:col(/^month/),sn:col(/serial/),date:col(/invoice date/),inv:col(/tax invoice no/),tin:col(/tin/),sup:col(/supplier$/,/name of/),desc:col(/^description/),val:col(/value of purchase/,/value/),vat:col(/vat amount/,/vat/)};
+    const ab=MN[+month.slice(5)-1].toUpperCase();
+    const multi=c.m>=0&&new Set(body.map(r=>String(r[c.m]).trim().toUpperCase().slice(0,3)).filter(Boolean)).size>1;
+    body.forEach(r=>{const inv=xlText(r[c.inv]); if(!inv&&!num(r[c.val])) return; if(!inv){skipped++;return}
+      if(multi&&String(r[c.m]).trim().toUpperCase().slice(0,3)!==ab){skipped++;return}
+      const value=num(r[c.val]);
+      rows.push({sn:c.sn<0?rows.length+1:r[c.sn],date:c.date<0?"":xlText(r[c.date]),inv,tin:c.tin<0?"":String(r[c.tin]).trim(),supplier:c.sup<0?"":String(r[c.sup]).trim(),desc:c.desc<0?"":String(r[c.desc]).trim(),value,vat:c.vat<0||r[c.vat]===""?num(value*0.18):num(r[c.vat])})});
+  }
+  if(!rows.length) throw new Error("No rows for "+mLabel(month)+" were found in sheet “"+name+"”"+(skipped?" ("+skipped+" rows belong to other months)":"")+".");
+  const ex=((S[kind][month]||{}).rows||[]).length;
+  const tot=kind==="ledger"?sum(rows,r=>r.amt):sum(rows,r=>r.vat);
+  return {kind,month,rows,text:"Sheet “"+name+"”: "+rows.length+" rows for "+mLabel(month)+", "+(kind==="ledger"?"input VAT ":"VAT ")+fmt(tot)+"."+(skipped?" "+skipped+" rows outside this month were left out.":"")+(ex?" Saving replaces the "+ex+" rows already held for this month.":"")};
+}
+
+/* ---- storage ---- */
+let chain=Promise.resolve();
+function save(coll,id,data){
+  const prev=S[coll][id]; S[coll][id]=data;
+  if(!db){flash("Changes cannot be saved in this view. Open the page signed in to keep them.",true);return Promise.resolve(false)}
+  chain=chain.then(()=>db.doc(coll+"/"+id).set(data)).then(()=>true,e=>{
+    S[coll][id]=prev; if(prev===undefined) delete S[coll][id];
+    if(e&&e.code==="invalid_argument"&&!/256|deep|size/i.test(e.message||"")) S.canWrite=false;
+    flash(S.canWrite?"Could not save: "+((e&&e.message)||"storage unavailable")+".":"You have view-only access, so changes are not saved.",true); render(); return false});
+  return chain;
+}
+async function load(){
+  db=await window.claude?.use?.("db")??null;
+  if(!db){S.loaded=true;$("status").textContent="Records are unavailable in this view. Sign in to load them.";render();return}
+  try{
+    for(const c of ["ledger","schedule","returns"]){const q=await db.collection(c).get(); S[c]={}; q.docs.forEach(d=>S[c][d.id]=d.data())}
+    const keys=Object.keys(S.ledger).concat(Object.keys(S.schedule)).sort();
+    const n=sum(Object.values(S.ledger),d=>(d.rows||[]).length);
+    $("status").textContent=n?n+" ledger invoices held"+(keys.length?", "+mLabel(keys[0])+" to "+mLabel(keys[keys.length-1]):""):"No records yet. Start by uploading a month’s ledger invoice list.";
+  }catch(e){$("status").textContent="Could not load records: "+((e&&e.message)||"storage unavailable")}
+  S.loaded=true; render();
+  const user=await window.claude?.use?.("user")??null;
+  if(user){const w=await user.can("data.write"); if(w===false){S.canWrite=false;render()}}
+  downloads=await window.claude?.use?.("downloads")??null; $("exportBtn").hidden=!downloads; if(downloads) render();
+}
+$("exportBtn").onclick=async()=>{
+  const C=compute(), wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(C.rows.filter(r=>inYear(r.pm)).map(r=>({"Invoice No.":r.no,"Posting Date":r.date,"Vendor Name":r.vendor,"External Document No.":r.ext,"Description":r.desc,"Amount (LCY)":r.amt,"Original VAT Invoice":r.orig,"Claimed Status":r.claimed?"Claimed":"Not Claimed","Claim Month":mLabel(r.cm)}))),"Invoice Listing");
+  const sr=[]; months().forEach(k=>((S.schedule[k]||{}).rows||[]).forEach(r=>sr.push({"Month":mLabel(k),"Serial No":r.sn,"Invoice Date":r.date,"Tax Invoice No":r.inv,"Supplier's TIN":r.tin,"Name of the Supplier":r.supplier,"Description":r.desc,"Value of purchase":r.value,"VAT Amount":r.vat,"Ledger Invoice":(C.ext[norm(r.inv)]||{}).no||""})));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sr),"IRD Submitted Input");
+  const rr=months().filter(k=>S.returns[k]).map(k=>{const o={"Month":mLabel(k)}; RF.forEach(([id,l])=>{if(id!=="sec")o[l]=S.returns[k][id]}); return o});
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rr),"VAT Returns");
+  try{await downloads.save({filename:"VAT input claims "+S.year+"-"+String(S.year+1).slice(2)+".xlsx",data:XLSX.write(wb,{type:"array",bookType:"xlsx"})})}
+  catch(e){if(e&&e.code!=="declined") flash("Export failed: "+((e&&e.message)||"unavailable"),true)}
+};
+const ty=$("taxYear"); for(let y=2025;y<=2028;y++) ty.innerHTML+='<option value="'+y+'"'+(y===S.year?" selected":"")+'>'+y+"/"+String(y+1).slice(2)+'</option>';
+ty.onchange=()=>{S.year=+ty.value;S.f.month="";S.schMonth="";S.retMonth="";S.pending=null;render()};
+$("tabs").onclick=e=>{const b=e.target.closest("button"); if(!b) return; S.tab=b.dataset.tab; S.pending=null; flash(""); render()};
+window.__vat={parseUpload,compute,S};
+render(); load();
+})();
+</script>

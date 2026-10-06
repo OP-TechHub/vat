@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+/* Palette ported from the prototype: a ledger-style workbench. */
+:root {
+  --bg: #f3f5f6;
+  --surface: #ffffff;
+  --ink: #16242b;
+  --muted: #5d6f78;
+  --line: #d6dde1;
+  --accent: #0e6b74;
+  --accent-ink: #ffffff;
+  --accent-soft: #e0f0f1;
+  --good: #1c7a48;
+  --good-soft: #e1f3e8;
+  --warn: #9a5b00;
+  --warn-soft: #fbefd9;
+  --bad: #b3372f;
+  --bad-soft: #fbe6e3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10181c;
+    --surface: #18232a;
+    --ink: #e6eef1;
+    --muted: #93a6af;
+    --line: #2c3b44;
+    --accent: #4fc0c9;
+    --accent-ink: #07282c;
+    --accent-soft: #17383d;
+    --good: #6bd19a;
+    --good-soft: #173527;
+    --warn: #f0b859;
+    --warn-soft: #3a2d12;
+    --bad: #f08b82;
+    --bad-soft: #3d1d1a;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --font-sans: var(--font-plex-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+@layer components {
+  .panel {
+    @apply bg-surface border border-line rounded-md p-3.5 flex flex-col gap-2.5;
+  }
+  .bar {
+    @apply flex flex-wrap gap-2.5 items-end;
+  }
+  .field {
+    @apply flex flex-col gap-1 text-xs text-muted;
+  }
+  .control {
+    @apply bg-surface text-ink border border-line rounded px-2 py-1.5 text-[13px] font-sans min-w-0;
+  }
+  .control:focus {
+    @apply outline-2 outline-accent outline-offset-0 border-accent;
+  }
+  .control:disabled {
+    @apply opacity-60;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 bg-surface text-ink border border-line rounded px-3 py-1.5 text-[13px] font-medium cursor-pointer whitespace-nowrap;
+  }
+  .btn:hover:not(:disabled) {
+    @apply bg-accent-soft border-accent;
+  }
+  .btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply bg-accent text-accent-ink border-accent;
+  }
+  .btn-primary:hover:not(:disabled) {
+    @apply bg-accent opacity-90;
+  }
+  .btn-danger {
+    @apply text-bad;
+  }
+  .btn-danger:hover:not(:disabled) {
+    @apply bg-bad-soft border-bad;
+  }
+  .num {
+    @apply text-right font-mono tabular-nums whitespace-nowrap;
+  }
+  .pill {
+    @apply inline-block px-2 py-px rounded-[10px] text-xs font-medium whitespace-nowrap;
+  }
+  .pill-good {
+    @apply bg-good-soft text-good;
+  }
+  .pill-warn {
+    @apply bg-warn-soft text-warn;
+  }
+  .pill-bad {
+    @apply bg-bad-soft text-bad;
+  }
+  .pill-info {
+    @apply bg-accent-soft text-accent;
+  }
+  .msg {
+    @apply px-3 py-2 rounded bg-accent-soft text-ink text-[13px];
+  }
+  .msg-err {
+    @apply bg-bad-soft text-bad;
+  }
+  .note {
+    @apply text-[13px] text-muted;
+  }
+  .scroll {
+    @apply overflow-auto border border-line rounded-md bg-surface max-h-[72vh];
+  }
+  .tbl {
+    @apply border-collapse w-full text-[13px];
+  }
+  .tbl th,
+  .tbl td {
+    @apply px-2.5 py-1.5 border-b border-line text-left align-top whitespace-nowrap;
+  }
+  .tbl th {
+    @apply sticky top-0 bg-surface text-[11px] uppercase tracking-[0.05em] text-muted font-semibold z-[1];
+  }
+  .tbl td.wrapc {
+    @apply whitespace-normal min-w-[180px];
+  }
+  .tbl tr.total td {
+    @apply font-semibold border-t-2 border-t-line;
+  }
+  .tbl td select,
+  .tbl td input {
+    @apply px-1 py-0.5 text-xs;
+  }
+  .stat {
+    @apply bg-surface border border-line rounded-md p-3;
+  }
+  .stat .label {
+    @apply text-xs text-muted uppercase tracking-[0.05em];
+  }
+  .stat .value {
+    @apply block font-mono text-[19px] font-medium mt-0.5 tabular-nums;
+  }
+  .tab {
+    @apply px-3 py-2 text-[13px] font-medium text-muted border-b-2 border-transparent -mb-px whitespace-nowrap;
+  }
+  .tab:hover {
+    @apply text-ink;
+  }
+  .tab[aria-current="page"] {
+    @apply text-accent border-accent;
+  }
+  .diff0 {
+    @apply text-muted;
+  }
+  .diffx {
+    @apply text-bad font-semibold;
+  }
+}
