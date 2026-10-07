@@ -2,7 +2,7 @@
 import * as XLSX from "xlsx";
 import { mLabel, monthsOf, yearLabel } from "./format";
 import { RETURN_FIELDS, cm, isClaimed, pm, rm } from "./reports";
-import type { Invoice, ReturnField, ScheduleLine, VatReturn } from "./types";
+import { LEDGER_AVAILABILITY_LABEL, type Invoice, type ReturnField, type ScheduleLine, type VatReturn } from "./types";
 
 export function exportWorkbook(
   year: number,
@@ -42,6 +42,8 @@ export function exportWorkbook(
         "Value of purchase": r.purchase_value,
         "VAT Amount": r.vat_amount,
         "Ledger Invoice": r.ledger_invoice_no ?? "",
+        "Ledger Availability": LEDGER_AVAILABILITY_LABEL[r.ledger_availability ?? "none"],
+        "Ledger Reference": r.ledger_reference ?? "",
       });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sr), "IRD Submitted Input");
 

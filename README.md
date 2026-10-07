@@ -10,6 +10,7 @@ Stack: Next.js (App Router, TypeScript), Tailwind CSS, Supabase (Postgres, Auth,
 |---|---|
 | `supabase/migrations/0001_init.sql` | Schema, derived views, RLS policies, upload functions |
 | `supabase/migrations/0002_members.sql` | Email lookup functions for the Members screen |
+| `supabase/migrations/0003_schedule_ledger_fields.sql` | Manual ledger availability / ledger reference columns on schedule lines |
 | `lib/reports.ts`, `lib/export.ts` | Summary and reconciliation calculations, Excel export |
 | `supabase/seed.sql` | Oceanpick 2026/27 data (608 invoices, 244 schedule lines, April return) |
 | `templates/` | Blank upload templates (also downloadable from the app) |
@@ -37,8 +38,9 @@ In the dashboard open **SQL Editor → New query**, then:
 
 1. Paste the whole of `supabase/migrations/0001_init.sql` and click **Run**. It creates the `vat_claims` schema, the tables, views, policies and upload functions, and grants the API roles access to the schema.
 2. Paste the whole of `supabase/migrations/0002_members.sql` and click **Run**. It adds two functions the Members screen uses to look up logins by email on the database side (the browser cannot read `auth.users`).
-3. Paste the whole of `supabase/seed.sql` and click **Run**. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
-4. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
+3. Paste the whole of `supabase/migrations/0003_schedule_ledger_fields.sql` and click **Run**. It adds the manual "Ledger availability" and "Ledger reference" columns to the IRD input schedule, rebuilds the `schedule_line_match` view and makes schedule re-uploads keep those two fields. Run it on existing projects too.
+4. Paste the whole of `supabase/seed.sql` and click **Run**. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
+5. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
 
 Or, with the Supabase CLI installed and logged in:
 
@@ -120,7 +122,7 @@ vercel --prod
 ## Uploads
 
 - **Ledger invoice list**: sheet named "Invoice Listing" (or the first sheet). Columns are matched by heading text anywhere in the first 15 rows: Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY), Source Currency Amount. Only rows posted in the chosen month are kept; duplicate invoice numbers are summed. Saving replaces that month's rows but keeps original-invoice marks and claimed-month overrides by invoice number.
-- **IRD input schedule**: sheet whose name contains "Input" (or the first sheet). Columns: Month, Serial No, Invoice Date, Tax Invoice No, Supplier's TIN, Name of the Supplier, Description, Value of purchase, VAT Amount. If the Month column holds several months, only the chosen month's rows are kept. A blank VAT Amount is taken as 18% of the value.
+- **IRD input schedule**: sheet whose name contains "Input" (or the first sheet). Columns: Month, Serial No, Invoice Date, Tax Invoice No, Supplier's TIN, Name of the Supplier, Description, Value of purchase, VAT Amount. If the Month column holds several months, only the chosen month's rows are kept. A blank VAT Amount is taken as 18% of the value. Each saved line has two hand-entered columns, **Ledger availability** (None by default, Available in ledger, Not available in ledger) and **Ledger reference** (free text); re-uploading a month keeps both for lines with the same tax invoice number.
 - Dates may be Excel serials or `dd.mm.yyyy`, `dd/mm/yyyy`, `yyyy-mm-dd` text. `.xlsx`, `.xls` and `.csv` are accepted. CSV cells are read as written, so `01/05/2026` is 1 May.
 
 ## Security notes

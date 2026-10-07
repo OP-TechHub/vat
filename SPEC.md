@@ -39,6 +39,7 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
    - Download template button beside the file chooser.
 4. **IRD input schedule**
    - Month selector; table of lines with a "Ledger invoice" column (matched invoice no. or "Not in ledger list"); totals.
+   - Two manual columns per line, editable inline by editors and admins: "Ledger availability" (None by default until someone sets it, Available in ledger, Not available in ledger) and "Ledger reference" (free text). Stored on `schedule_lines`, included in the Excel export, and preserved on re-upload by tax invoice number.
    - Upload a month (same preview-then-confirm flow) and Download template. If the file has a Month column with several months, keep only the chosen month's rows. If VAT Amount is blank, use 18% of the value.
 5. **VAT reconciliation**
    - Form per month for the `vat_returns` fields.

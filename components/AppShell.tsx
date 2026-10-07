@@ -48,6 +48,7 @@ export interface AppState {
   error: string | null;
   reload: () => Promise<void>;
   patchInvoice: (inv: Invoice) => void;
+  patchScheduleLine: (line: ScheduleLine) => void;
   patchReturn: (r: VatReturn) => void;
   flash: (text: string | null, err?: boolean) => void;
 }
@@ -168,6 +169,9 @@ export default function AppShell({
   const patchInvoice = useCallback((inv: Invoice) => {
     setData((d) => ({ ...d, invoices: d.invoices.map((x) => (x.id === inv.id ? inv : x)) }));
   }, []);
+  const patchScheduleLine = useCallback((line: ScheduleLine) => {
+    setData((d) => ({ ...d, schedule: d.schedule.map((x) => (x.id === line.id ? line : x)) }));
+  }, []);
   const patchReturn = useCallback((r: VatReturn) => {
     setData((d) => {
       const others = d.returns.filter((x) => x.return_month !== r.return_month);
@@ -214,6 +218,7 @@ export default function AppShell({
     error,
     reload,
     patchInvoice,
+    patchScheduleLine,
     patchReturn,
     flash,
   };

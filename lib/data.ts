@@ -104,6 +104,13 @@ export async function loadReturns(sb: Db, companyId: string, year: number): Prom
   return data ?? [];
 }
 
+/** Re-read one schedule line from the view after an inline edit so derived fields are fresh. */
+export async function reloadScheduleLine(sb: Db, id: string): Promise<ScheduleLine> {
+  const { data, error } = await sb.from("schedule_line_match").select("*").eq("id", id).single();
+  if (error) throw new Error(error.message);
+  return data as ScheduleLine;
+}
+
 /** Re-read one invoice from the view after an inline edit so derived fields are fresh. */
 export async function reloadInvoice(sb: Db, id: string): Promise<Invoice> {
   const { data, error } = await sb.from("invoice_claim_status").select("*").eq("id", id).single();

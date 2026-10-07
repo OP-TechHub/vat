@@ -107,6 +107,10 @@ const schedule: ScheduleLine[] = seed.schedule_lines.map((r, i) => ({
   vat_amount: numv(r.vat_amount),
   created_at: "",
   created_by: null,
+  ledger_availability: "none",
+  ledger_reference: null,
+  updated_at: null,
+  updated_by: null,
   ledger_invoice_no: null,
 }));
 

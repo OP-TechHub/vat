@@ -26,6 +26,15 @@ export interface Invoice {
   claim_status: "Claimed" | "Not Claimed";
 }
 
+/** Manual review of a schedule line against the ledger. "none" = not yet reviewed (default). */
+export type LedgerAvailability = "none" | "available" | "not_available";
+
+export const LEDGER_AVAILABILITY_LABEL: Record<LedgerAvailability, string> = {
+  none: "None",
+  available: "Available in ledger",
+  not_available: "Not available in ledger",
+};
+
 /** Row of the schedule_line_match view. */
 export interface ScheduleLine {
   id: string;
@@ -41,6 +50,10 @@ export interface ScheduleLine {
   vat_amount: number;
   created_at: string;
   created_by: string | null;
+  ledger_availability: LedgerAvailability;
+  ledger_reference: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
   ledger_invoice_no: string | null;
 }
 
