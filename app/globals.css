@@ -149,6 +149,11 @@ body {
   .tbl td.wrapc {
     @apply whitespace-normal min-w-[180px];
   }
+  /* .tbl td outranks .num on specificity, so numbers need their own right-aligned rule here. */
+  .tbl th.num,
+  .tbl td.num {
+    @apply text-right;
+  }
   .tbl tr.total td {
     @apply font-semibold border-t-2 border-t-line;
   }

@@ -153,19 +153,42 @@ export function matrix(rows: Invoice[], months: string[]): { columns: string[]; 
   return { columns, rows: out, total: build(rows, "Total") };
 }
 
-/** Return form fields in display order, with cage references. "sec" rows are section headings. */
+/**
+ * Return form fields in display order, with cage references, following the "VAT Return_Upload"
+ * workbook. "sec" rows are section headings. Derived cages (7, 9, 13, 14) are not here.
+ */
 export const RETURN_FIELDS: ReadonlyArray<readonly [ReturnField | "sec", string]> = [
-  ["sec", "Supplies"],
+  ["sec", "Output tax and supplies"],
+  ["taxable_value", "Taxable supplies, value (A)"],
+  ["taxable_tax", "Taxable supplies, tax (0)"],
+  ["wholesale_retail", "Wholesale and retail taxable supplies (B / 2)"],
+  ["suspended_supplies", "VAT suspended taxable supplies (C / 2A)"],
+  ["output_tax", "Total output tax (3)"],
   ["zero_rated", "Zero rated supplies, goods (D)"],
+  ["zero_rated_services", "Zero rated supplies, services (D1)"],
   ["exempt", "Exempt supplies (E)"],
+  ["excluded_supplies", "Excluded supplies (E1)"],
   ["sec", "Input tax"],
   ["imports_value", "Imports, value (H)"],
   ["imports_deferred", "Imports, deferred tax (4)"],
   ["imports_upfront", "Imports, upfront tax (5)"],
   ["local_value", "Local purchases, value (I)"],
   ["local_tax", "Local purchases, tax (6)"],
-  ["disallowed", "Disallowable input tax (8)"],
+  ["suspended_purchases_value", "VAT suspended purchases, value (J)"],
+  ["suspended_purchases_tax", "VAT suspended purchases, suspended tax (K)"],
+  ["imports_no_vat", "Imports on which VAT is not charged (J2)"],
+  ["disallowed", "Disallowable input tax on imports, other purchases and adjustment (8)"],
+  ["disallowed_suspended", "Disallowable input tax on suspended purchases (8A)"],
   ["brought_forward", "Brought forward input tax (10)"],
+  ["sec", "Allowable input tax and tax payable / refundable"],
+  ["allowable_zero_rated", "Zero rated, suspended, wholesale & retail, s.22(7) (11)"],
+  ["not_group_a", "Not belonging to group A (12)"],
+  ["gross_refund", "Gross refund due (15)"],
+  ["tax_payable", "Tax payable (16)"],
+  ["monthly_payments", "Monthly payments (Q)"],
+  ["svat_credit", "Tax credit based on SVAT credit voucher (R2)"],
+  ["total_credits", "Total credits (17)"],
+  ["net_refund_payable", "(Refund due) / tax payable (18)"],
   ["sec", "As per ledger"],
   ["ledger_exports", "Exports as per ledger"],
   ["ledger_local_sales", "Local sales as per ledger"],
@@ -176,9 +199,17 @@ export const RETURN_FIELD_IDS = RETURN_FIELDS.filter(([id]) => id !== "sec").map
 
 export interface ReturnCalc {
   t7: number; // total input tax (4+5+6)
-  t9: number; // allowable (7-8)
+  t9: number; // allowable excluding b/f (7-8)
   avail: number; // available (9+10)
+  t13: number; // allowable input tax (11+12)
+  t14: number; // unabsorbed excess input tax c/f (9+10-13)
+  chk15: number; // cage 15 less (13-3-8A)
+  chk18: number; // cage 18 less (16-17-15)
   sugg: number; // disallowable by exempt ratio = t7 * E / (D+E)
+  d8: number; // cage 8 less computed
+  suggK: number; // suspended purchases disallowable = K * E / (D+E)
+  d8A: number; // cage 8A less computed
+  impliedRate: number | null; // K / J, null when J is nil
   sched: number; // schedule VAT total for the month
   dSched: number; // local tax (6) - schedule VAT
   dExp: number; // zero rated - ledger exports
@@ -189,10 +220,12 @@ export interface ReturnCalc {
 
 export function retCalc(r: VatReturn, schedule: ScheduleLine[], allRows: Invoice[]): ReturnCalc {
   const k = rm(r);
-  const n = (f: ReturnField) => +r[f] || 0;
+  const n = (f: ReturnField) => +(r[f] ?? 0) || 0;
   const t7 = n("imports_deferred") + n("imports_upfront") + n("local_tax");
   const t9 = t7 - n("disallowed");
+  const t13 = n("allowable_zero_rated") + n("not_group_a");
   const sup = n("zero_rated") + n("exempt");
+  const ratio = sup ? n("exempt") / sup : 0;
   const sched = sum(
     schedule.filter((x) => rm(x) === k),
     (x) => x.vat_amount,
@@ -201,7 +234,15 @@ export function retCalc(r: VatReturn, schedule: ScheduleLine[], allRows: Invoice
     t7,
     t9,
     avail: t9 + n("brought_forward"),
-    sugg: sup ? (t7 * n("exempt")) / sup : 0,
+    t13,
+    t14: t9 + n("brought_forward") - t13,
+    chk15: n("gross_refund") - (t13 - n("output_tax") - n("disallowed_suspended")),
+    chk18: n("net_refund_payable") - (n("tax_payable") - n("total_credits") - n("gross_refund")),
+    sugg: t7 * ratio,
+    d8: n("disallowed") - t7 * ratio,
+    suggK: n("suspended_purchases_tax") * ratio,
+    d8A: n("disallowed_suspended") - n("suspended_purchases_tax") * ratio,
+    impliedRate: n("suspended_purchases_value") ? n("suspended_purchases_tax") / n("suspended_purchases_value") : null,
     sched,
     dSched: n("local_tax") - sched,
     dExp: n("zero_rated") - n("ledger_exports"),

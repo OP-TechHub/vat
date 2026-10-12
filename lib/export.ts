@@ -83,7 +83,7 @@ export function exportWorkbook(
     .filter((r): r is VatReturn => !!r)
     .map((r) => {
       const o: Record<string, string | number> = { Month: mLabel(rm(r)) };
-      for (const [id, label] of RETURN_FIELDS) if (id !== "sec") o[label] = +r[id as ReturnField] || 0;
+      for (const [id, label] of RETURN_FIELDS) if (id !== "sec") o[label] = +(r[id as ReturnField] ?? 0) || 0;
       return o;
     });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rr), "VAT Returns");

@@ -5,7 +5,7 @@
  */
 import * as XLSX from "xlsx";
 import { MN, mLabel, fmt, sum, cents } from "./format";
-import type { ExportUploadRow, LedgerUploadRow, ReturnPeriodRow, ScheduleUploadRow } from "./types";
+import { CAGES, type CageField, type ExportUploadRow, type LedgerUploadRow, type ReturnPeriodRow, type ScheduleUploadRow } from "./types";
 
 export type UploadKind = "ledger" | "schedule" | "export";
 
@@ -343,18 +343,8 @@ export function parseExport(
   };
 }
 
-/** Cage code (column B of the workbook) -> vat_returns field. */
-const CAGE_FIELD: Record<string, Exclude<keyof ReturnPeriodRow, "return_month" | "submitted_on">> = {
-  D: "zero_rated",
-  E: "exempt",
-  H: "imports_value",
-  "4": "imports_deferred",
-  "5": "imports_upfront",
-  I: "local_value",
-  "6": "local_tax",
-  "8": "disallowed",
-  "10": "brought_forward",
-};
+/** Cage code (column B of the workbook, spaces removed) -> vat_returns field. */
+const CAGE_FIELD: Record<string, CageField> = Object.fromEntries(CAGES.map(([field, code]) => [code, field]));
 
 export interface ParsedReturns {
   sheet: string;
@@ -366,8 +356,9 @@ export interface ParsedReturns {
 /**
  * Parse the "VAT Return_Upload" workbook: one column per taxable period, one row per cage.
  * Row "Taxable period" holds the first day of each period; "Date of submission" the acknowledgement
- * date; the cage rows are matched by the code in column B (D, E, H, 4, 5, I, 6, 8, 10).
- * Periods with no figures in any of those cages are left out. The first sheet is used.
+ * date; the cage rows are matched by the code in column B (A, 0, B/2, C/2A, 3, D, D1, E, E1, H, 4, 5,
+ * I, 6, J, K, J2, 8, 8A, 10, 11, 12, 15, 16, Q, R2, 17, 18). Derived cages 7, 9, 13, 14 are ignored.
+ * Periods with no figures in any entered cage are left out. The first sheet is used.
  */
 export function parseReturnWorkbook(buf: ArrayBuffer | Uint8Array): ParsedReturns {
   const wb = XLSX.read(buf, { type: "array", cellDates: false, raw: true });
@@ -381,11 +372,11 @@ export function parseReturnWorkbook(buf: ArrayBuffer | Uint8Array): ParsedReturn
   const si = rowIdx(/date of submission/i);
   const cageRows: Record<string, number> = {};
   A.forEach((r, i) => {
-    const code = str(r[1]).toUpperCase();
+    const code = str(r[1]).toUpperCase().replace(/\s+/g, "");
     if (i !== pi && CAGE_FIELD[code] !== undefined && cageRows[code] === undefined) cageRows[code] = i;
   });
   if (Object.keys(cageRows).length < 3)
-    throw new UploadError(`Could not find the cage codes (D, E, H, 4, 5, I, 6, 8, 10) in column B of sheet “${name}”.`);
+    throw new UploadError(`Could not find the cage codes (D, E, H, 4, 5, I, 6, 8, 10 …) in column B of sheet “${name}”.`);
 
   const periods: ReturnPeriodRow[] = [];
   const seen = new Set<string>();
@@ -397,19 +388,11 @@ export function parseReturnWorkbook(buf: ArrayBuffer | Uint8Array): ParsedReturn
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
     const month = d.slice(0, 7) + "-01";
     if (seen.has(month)) continue;
-    const row: ReturnPeriodRow = {
+    const row = {
       return_month: month,
       submitted_on: null,
-      zero_rated: 0,
-      exempt: 0,
-      imports_value: 0,
-      imports_deferred: 0,
-      imports_upfront: 0,
-      local_value: 0,
-      local_tax: 0,
-      disallowed: 0,
-      brought_forward: 0,
-    };
+      ...(Object.fromEntries(CAGES.map(([f]) => [f, 0])) as Record<CageField, number>),
+    } as ReturnPeriodRow;
     let any = false;
     for (const [code, ri] of Object.entries(cageRows)) {
       const cell = A[ri][c];

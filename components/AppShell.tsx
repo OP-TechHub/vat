@@ -69,6 +69,8 @@ const LS_COMPANY = "vat.company";
 const LS_YEAR = "vat.year";
 
 const currentTaxYear = () => taxYearOf(new Date().toISOString().slice(0, 10));
+/** Earliest tax year offered: April 2019 to March 2020, which holds the first filing period (Jan 2020). */
+const FIRST_TAX_YEAR = 2019;
 
 /** PostgREST's error when a table, view or column from an unapplied migration is queried. */
 const isMissingTable = (e: unknown) =>
@@ -216,10 +218,11 @@ export default function AppShell({
   const months = useMemo(() => monthsOf(year), [year]);
   const yearInvoices = useMemo(() => data.invoices.filter((r) => months.includes(pm(r))), [data.invoices, months]);
 
+  // Tax years from 2019/20 (the filing register starts Jan 2020) to next year.
   const years = useMemo(() => {
     const cur = currentTaxYear();
     const ys: number[] = [];
-    for (let y = Math.min(2024, year); y <= Math.max(cur + 1, year); y++) ys.push(y);
+    for (let y = Math.min(FIRST_TAX_YEAR, year); y <= Math.max(cur + 1, year); y++) ys.push(y);
     return ys;
   }, [year]);
 

@@ -57,6 +57,42 @@ export interface ScheduleLine {
   ledger_invoice_no: string | null;
 }
 
+/**
+ * Entered cages of the return held on vat_returns, in return order, with the IRD cage code.
+ * Cages 7, 9, 13, 14 and the checks are derived (see reports.ts).
+ */
+export const CAGES = [
+  ["taxable_value", "A"],
+  ["taxable_tax", "0"],
+  ["wholesale_retail", "B/2"],
+  ["suspended_supplies", "C/2A"],
+  ["output_tax", "3"],
+  ["zero_rated", "D"],
+  ["zero_rated_services", "D1"],
+  ["exempt", "E"],
+  ["excluded_supplies", "E1"],
+  ["imports_value", "H"],
+  ["imports_deferred", "4"],
+  ["imports_upfront", "5"],
+  ["local_value", "I"],
+  ["local_tax", "6"],
+  ["suspended_purchases_value", "J"],
+  ["suspended_purchases_tax", "K"],
+  ["imports_no_vat", "J2"],
+  ["disallowed", "8"],
+  ["disallowed_suspended", "8A"],
+  ["brought_forward", "10"],
+  ["allowable_zero_rated", "11"],
+  ["not_group_a", "12"],
+  ["gross_refund", "15"],
+  ["tax_payable", "16"],
+  ["monthly_payments", "Q"],
+  ["svat_credit", "R2"],
+  ["total_credits", "17"],
+  ["net_refund_payable", "18"],
+] as const;
+export type CageField = (typeof CAGES)[number][0];
+
 export interface VatReturn {
   company_id: string;
   return_month: string; // YYYY-MM-DD
@@ -69,6 +105,26 @@ export interface VatReturn {
   local_tax: number;
   disallowed: number;
   brought_forward: number;
+  // Cages added by migration 0006; absent on rows read before it was run.
+  taxable_value?: number;
+  taxable_tax?: number;
+  wholesale_retail?: number;
+  suspended_supplies?: number;
+  output_tax?: number;
+  zero_rated_services?: number;
+  excluded_supplies?: number;
+  suspended_purchases_value?: number;
+  suspended_purchases_tax?: number;
+  imports_no_vat?: number;
+  disallowed_suspended?: number;
+  allowable_zero_rated?: number;
+  not_group_a?: number;
+  gross_refund?: number;
+  tax_payable?: number;
+  monthly_payments?: number;
+  svat_credit?: number;
+  total_credits?: number;
+  net_refund_payable?: number;
   ledger_exports: number;
   ledger_local_sales: number;
   ledger_imports: number;
@@ -92,19 +148,10 @@ export interface ReturnDocument {
 }
 
 /** Cage figures of one taxable period parsed from the "VAT Return_Upload" workbook, ready to upsert. */
-export interface ReturnPeriodRow {
+export type ReturnPeriodRow = {
   return_month: string; // YYYY-MM-DD
   submitted_on: string | null;
-  zero_rated: number;
-  exempt: number;
-  imports_value: number;
-  imports_deferred: number;
-  imports_upfront: number;
-  local_value: number;
-  local_tax: number;
-  disallowed: number;
-  brought_forward: number;
-}
+} & Record<CageField, number>;
 
 export type ReturnField = Exclude<
   keyof VatReturn,

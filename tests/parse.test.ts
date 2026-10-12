@@ -295,6 +295,13 @@ describe("parseReturnWorkbook", () => {
     const apr = p.periods.find((r) => r.return_month === "2026-04-01")!;
     expect(apr.local_tax).toBe(1386009);
     expect(apr.submitted_on).toBe("2026-05-31");
+    const aug = p.periods[p.periods.length - 1];
+    expect(aug.gross_refund).toBe(13352193);
+    expect(aug.net_refund_payable).toBe(-13352193);
+    expect(aug.imports_upfront).toBe(106800);
+    const sep25 = p.periods.find((r) => r.return_month === "2025-09-01")!;
+    expect(sep25.suspended_purchases_tax).toBe(4528641);
+    expect(sep25.disallowed_suspended).toBe(352815);
   });
 });
 

@@ -1,17 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import Link from "next/link";
 import { useApp } from "./AppShell";
 import { mLabel, monthKey, monthsBetween, periodCode } from "@/lib/format";
 import { loadFiling, type FilingData } from "@/lib/data";
-import { parseReturnWorkbook, type ParsedReturns } from "@/lib/parse";
+import { DOC_ACCEPT, DOC_LABEL, documentUrl, isMissingTable, removeDocument, uploadDocument } from "@/lib/documents";
 import type { DocumentKind, ReturnDocument } from "@/lib/types";
 
 /** First taxable period shown on the register. */
 const FIRST_PERIOD = "2020-01";
-const BUCKET = "vat-claims";
-const DOC_LABEL: Record<DocumentKind, string> = { return: "Return", acknowledgement: "Acknowledgement" };
-const ACCEPT = ".pdf,.jpg,.jpeg,.png";
 
 type Filter = "" | "missing";
 
@@ -23,15 +21,13 @@ interface PeriodRow {
 }
 
 export default function FilingView() {
-  const { supabase, company, user, canWrite, reload, flash } = useApp();
+  const { supabase, company, user, canWrite, flash } = useApp();
   const [filing, setFiling] = useState<FilingData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("");
-  const [pending, setPending] = useState<ParsedReturns | null>(null);
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [from, setFrom] = useState(""); // taxable period range, "" = open-ended
+  const [to, setTo] = useState("");
   const [busy, setBusy] = useState<string | null>(null); // "<month>:<kind>" while a document is changing
-  const dataFileRef = useRef<HTMLInputElement>(null);
   const docFileRef = useRef<HTMLInputElement>(null);
   const docTarget = useRef<{ month: string; kind: DocumentKind } | null>(null);
 
@@ -46,7 +42,7 @@ export default function FilingView() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load the filing register.";
       setError(
-        /schema cache|does not exist/i.test(msg)
+        isMissingTable(e)
           ? `${msg}. Run supabase/migrations/0005_return_filing.sql in the Supabase SQL Editor (see README step 2).`
           : msg,
       );
@@ -56,8 +52,6 @@ export default function FilingView() {
 
   useEffect(() => {
     setFiling(null);
-    setPending(null);
-    setParseError(null);
     void load();
   }, [load]);
 
@@ -84,54 +78,19 @@ export default function FilingView() {
     return Object.values(byMonth).reverse();
   }, [filing]);
 
-  const shown = useMemo(
-    () => (filter === "missing" ? rows.filter((r) => !r.hasData || !r.docs.return || !r.docs.acknowledgement) : rows),
-    [rows, filter],
-  );
+  // Oldest first for the period selectors.
+  const periodKeys = useMemo(() => rows.map((r) => r.month).reverse(), [rows]);
+  const shown = useMemo(() => {
+    const lo = from && to && from > to ? to : from;
+    const hi = from && to && from > to ? from : to;
+    let r = rows;
+    if (lo) r = r.filter((x) => x.month >= lo);
+    if (hi) r = r.filter((x) => x.month <= hi);
+    if (filter === "missing") r = r.filter((x) => !x.hasData || !x.docs.return || !x.docs.acknowledgement);
+    return r;
+  }, [rows, filter, from, to]);
   const count = (f: (r: PeriodRow) => boolean) => rows.filter(f).length;
 
-  // ----- Return data upload (VAT Return_Upload workbook) -----
-  function onDataFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setParseError(null);
-    setPending(null);
-    const rd = new FileReader();
-    rd.onload = () => {
-      try {
-        setPending(parseReturnWorkbook(rd.result as ArrayBuffer));
-      } catch (err) {
-        setParseError(err instanceof Error ? err.message : "Could not read the file.");
-      }
-    };
-    rd.onerror = () => setParseError("Could not read the file.");
-    rd.readAsArrayBuffer(file);
-  }
-
-  async function saveData() {
-    if (!pending || !company) return;
-    setSaving(true);
-    const now = new Date().toISOString();
-    const payload = pending.periods.map((p) => ({ ...p, company_id: company.id, updated_by: user.id, updated_at: now }));
-    const { error: err } = await supabase.from("vat_returns").upsert(payload, { onConflict: "company_id,return_month" });
-    setSaving(false);
-    if (err) {
-      flash("Could not save: " + err.message, true);
-      return;
-    }
-    flash(`Saved return data for ${pending.periods.length} periods.`);
-    setPending(null);
-    if (dataFileRef.current) dataFileRef.current.value = "";
-    await Promise.all([load(), reload()]);
-  }
-
-  function cancelData() {
-    setPending(null);
-    setParseError(null);
-    if (dataFileRef.current) dataFileRef.current.value = "";
-  }
-
-  // ----- Return / acknowledgement documents -----
   function pickDocument(month: string, kind: DocumentKind) {
     docTarget.current = { month, kind };
     docFileRef.current?.click();
@@ -143,26 +102,9 @@ export default function FilingView() {
     e.target.value = "";
     if (!file || !target || !company) return;
     const { month, kind } = target;
-    const key = month + ":" + kind;
-    setBusy(key);
-    const safe = file.name.replace(/[^\w.\-()\s]+/g, "_").slice(-120);
-    const path = `${company.id}/${month}/${kind}/${safe}`;
-    const existing = rows.find((r) => r.month === month)?.docs[kind];
+    setBusy(month + ":" + kind);
     try {
-      if (existing && existing.path !== path) await supabase.storage.from(BUCKET).remove([existing.path]);
-      const up = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type || undefined });
-      if (up.error) throw new Error(up.error.message);
-      const row: ReturnDocument = {
-        company_id: company.id,
-        return_month: month + "-01",
-        kind,
-        path,
-        filename: file.name,
-        uploaded_at: new Date().toISOString(),
-        uploaded_by: user.id,
-      };
-      const { error: err } = await supabase.from("return_documents").upsert(row, { onConflict: "company_id,return_month,kind" });
-      if (err) throw new Error(err.message);
+      await uploadDocument(supabase, company.id, user.id, month, kind, file, rows.find((r) => r.month === month)?.docs[kind]);
       flash(`${DOC_LABEL[kind]} for ${mLabel(month)} uploaded.`);
       await load();
     } catch (err) {
@@ -172,29 +114,18 @@ export default function FilingView() {
   }
 
   async function openDocument(doc: ReturnDocument) {
-    const { data, error: err } = await supabase.storage.from(BUCKET).createSignedUrl(doc.path, 300);
-    if (err || !data?.signedUrl) {
-      flash("Could not open the file: " + (err?.message ?? "no link returned"), true);
-      return;
+    try {
+      window.open(await documentUrl(supabase, doc), "_blank", "noopener");
+    } catch (err) {
+      flash("Could not open the file: " + (err instanceof Error ? err.message : String(err)), true);
     }
-    window.open(data.signedUrl, "_blank", "noopener");
   }
 
-  async function removeDocument(month: string, doc: ReturnDocument) {
-    if (!company) return;
+  async function remove(month: string, doc: ReturnDocument) {
     if (!window.confirm(`Remove the ${DOC_LABEL[doc.kind].toLowerCase()} for ${mLabel(month)} (${doc.filename})?`)) return;
-    const key = month + ":" + doc.kind;
-    setBusy(key);
+    setBusy(month + ":" + doc.kind);
     try {
-      const rm = await supabase.storage.from(BUCKET).remove([doc.path]);
-      if (rm.error) throw new Error(rm.error.message);
-      const { error: err } = await supabase
-        .from("return_documents")
-        .delete()
-        .eq("company_id", company.id)
-        .eq("return_month", doc.return_month)
-        .eq("kind", doc.kind);
-      if (err) throw new Error(err.message);
+      await removeDocument(supabase, doc);
       flash(`${DOC_LABEL[doc.kind]} for ${mLabel(month)} removed.`);
       await load();
     } catch (err) {
@@ -225,7 +156,7 @@ export default function FilingView() {
                 {doc ? "Replace" : "Upload"}
               </button>
               {doc && (
-                <button className="btn btn-danger" type="button" disabled={isBusy} onClick={() => void removeDocument(r.month, doc)}>
+                <button className="btn btn-danger" type="button" disabled={isBusy} onClick={() => void remove(r.month, doc)}>
                   Remove
                 </button>
               )}
@@ -238,47 +169,31 @@ export default function FilingView() {
 
   return (
     <>
-      {canWrite && (
-        <div className="panel">
-          <h2 className="text-[15px] font-semibold m-0">Upload return data</h2>
-          <div className="note">
-            The “VAT Return_Upload” workbook: one column per taxable period with the period’s first day in the
-            “Taxable period” row, the acknowledgement date in the “Date of submission” row and the cage codes in
-            column B. Cages D, E, H, 4, 5, I, 6, 8 and 10 are taken for every period in the file and shown on the
-            VAT reconciliation tab. Ledger figures already entered for a period are kept.
-          </div>
-          <div className="bar">
-            <label className="field">
-              File
-              <input
-                ref={dataFileRef}
-                className="control file:mr-2 file:border-0 file:bg-transparent file:text-ink file:font-medium"
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={onDataFile}
-              />
-            </label>
-          </div>
-          {parseError && <div className="msg msg-err">{parseError}</div>}
-          {pending && (
-            <>
-              <div className="msg">{pending.text}</div>
-              <div className="bar">
-                <button className="btn btn-primary" type="button" onClick={() => void saveData()} disabled={saving}>
-                  {saving ? "Saving…" : `Save ${pending.periods.length} periods`}
-                </button>
-                <button className="btn" type="button" onClick={cancelData} disabled={saving}>
-                  Cancel
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      <input ref={docFileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => void onDocFile(e)} />
+      <input ref={docFileRef} type="file" accept={DOC_ACCEPT} className="hidden" onChange={(e) => void onDocFile(e)} />
 
       <div className="bar">
+        <label className="field">
+          Taxable period from
+          <select className="control" value={from} onChange={(e) => setFrom(e.target.value)}>
+            <option value="">{mLabel(FIRST_PERIOD)} (first)</option>
+            {periodKeys.map((m) => (
+              <option key={m} value={m}>
+                {mLabel(m)} · {periodCode(m)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          To
+          <select className="control" value={to} onChange={(e) => setTo(e.target.value)}>
+            <option value="">Latest</option>
+            {periodKeys.map((m) => (
+              <option key={m} value={m}>
+                {mLabel(m)} · {periodCode(m)}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field">
           Show
           <select className="control" value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
@@ -286,10 +201,23 @@ export default function FilingView() {
             <option value="missing">Periods with something missing</option>
           </select>
         </label>
+        {(from || to) && (
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              setFrom("");
+              setTo("");
+            }}
+          >
+            Clear range
+          </button>
+        )}
         {filing && (
           <span className="note pb-1.5">
-            {rows.length} periods from {mLabel(FIRST_PERIOD)} · data {count((r) => r.hasData)} · returns{" "}
-            {count((r) => !!r.docs.return)} · acknowledgements {count((r) => !!r.docs.acknowledgement)}
+            {shown.length === rows.length ? `${rows.length} periods` : `${shown.length} of ${rows.length} periods`} from{" "}
+            {mLabel(FIRST_PERIOD)} · data {count((r) => r.hasData)} · returns {count((r) => !!r.docs.return)} ·
+            acknowledgements {count((r) => !!r.docs.acknowledgement)}
           </span>
         )}
       </div>
@@ -318,7 +246,9 @@ export default function FilingView() {
             ) : !shown.length ? (
               <tr>
                 <td colSpan={6} className="note">
-                  Every period has its data, return and acknowledgement.
+                  {filter === "missing"
+                    ? "Every period in this range has its data, return and acknowledgement."
+                    : "No periods in this range."}
                 </td>
               </tr>
             ) : (
@@ -340,9 +270,12 @@ export default function FilingView() {
       </div>
       <div className="note">
         Period code is the IRD format YYQM (year, quarter, month within the quarter). Data uploaded is Yes when the
-        period’s return figures are held, from the workbook above or entered on the VAT reconciliation tab. Return and
-        acknowledgement are Yes when a document (PDF or image, up to 25 MB) is held for the period; Open gives a link
-        that works for five minutes.
+        period’s return figures are held; load the “VAT Return_Upload” workbook or enter figures on the{" "}
+        <Link href="/returns" className="underline">
+          VAT reconciliation
+        </Link>{" "}
+        tab. Return and acknowledgement are Yes when a document (PDF or image, up to 25 MB) is held for the period;
+        Open gives a link that works for five minutes.
       </div>
     </>
   );
