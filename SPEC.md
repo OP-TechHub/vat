@@ -16,7 +16,8 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 | `vat_returns` | One row of return figures per month |
 | `invoice_claim_status` (view) | Ledger invoices with derived `claim_status`, `claim_month`, `auto_claim_month` |
 | `schedule_line_match` (view) | Schedule lines with the matching ledger invoice number, if any |
-| `replace_ledger_month`, `replace_schedule_month` (RPC) | Atomic replace of one month on upload |
+| `export_sales` | Export sales report lines with customs details, per sales-report month (migration 0004) |
+| `replace_ledger_month`, `replace_schedule_month`, `replace_export_month` (RPC) | Atomic replace of one month on upload |
 
 `supabase/seed.sql` loads Oceanpick's 2026/27 data: 608 ledger invoices (Apr–Aug 2026), 244 schedule lines, the April return.
 
@@ -41,6 +42,12 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
    - Month selector; table of lines with a "Ledger invoice" column (matched invoice no. or "Not in ledger list"); totals.
    - Two manual columns per line, editable inline by editors and admins: "Ledger availability" (None by default until someone sets it, Available in ledger, Not available in ledger) and "Ledger reference" (free text). Stored on `schedule_lines`, included in the Excel export, and preserved on re-upload by tax invoice number.
    - Upload a month (same preview-then-confirm flow) and Download template. If the file has a Month column with several months, keep only the chosen month's rows. If VAT Amount is blank, use 18% of the value.
+4a. **Export reconciliation** (table `export_sales`, one row per export invoice per sales-report month)
+   - Column groups as in the Excel sheet. Details in sales report: Invoice No, Month, Amount FC (FOB) USD / EUR, Ex.rate, Net Sales (A). As per customs: Cusdec No, Date, Month, Currency Type (USD / EUR), Ex. Rate Custom LKR, Invoice Value as Per USD / EUR, Custom Value. Differences: Exchange Difference (1) = Custom Value − Net Sales (derived, never stored), Short Shipment (3), Sales Reversed in the Month (4), Updated in Custom Report.
+   - Upload a sales-report month (same preview-then-confirm flow, Download template). Only the sales-report columns are required; customs and difference columns are taken if present. Re-upload keeps customs details already entered by invoice number where the file is blank.
+   - Editors fill in or correct the customs and difference columns inline. Custom Value is recalculated as invoice value × customs rate whenever either changes.
+   - View from / to month selectors show any range within the tax year, with a subtotal row per month (amount FC, net sales, customs value, exchange difference, short shipment, sales reversed) and a grand total when more than one month is shown.
+   - Included in the Excel export as the "Export Reconciliation" sheet.
 5. **VAT reconciliation**
    - Form per month for the `vat_returns` fields.
    - Table with months as columns: entered lines; total input tax (4+5+6); disallowable by exempt ratio = total × E ÷ (D+E); allowable (7−8); available (9+10); differences return vs ledger for exports, local sales, imports; schedule VAT total vs local purchases tax; claimed from ledger invoices. Differences under 1 rupee count as agreed; larger ones are highlighted.
@@ -50,6 +57,7 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 ## Upload formats (`templates/`)
 - Ledger: sheet "Invoice Listing"; Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY), Source Currency Amount.
 - Schedule: Month, Serial No, Invoice Date, Tax Invoice No, Supplier's TIN, Name of the Supplier, Description, Value of purchase, VAT Amount.
+- Export sales report: Invoice No, Month, Amount FC (FOB) USD / EUR, Ex.rate, Net Sales (A), then optionally Cusdec No, Date, Month, Currency Type, Ex. Rate Custom LKR, Invoice Value as Per USD / EUR, Custom Value, Short Shipment (3), Sales Reversed in the Month (4), Updated in Custom Report. A group-heading row above the column headings and month subtotal rows are ignored.
 - Find the header row within the first 15 rows; match columns by heading text, not position. Accept Excel serial dates and dd.mm.yyyy / dd/mm/yyyy / yyyy-mm-dd text. Accept .xlsx, .xls, .csv.
 
 ## Permissions

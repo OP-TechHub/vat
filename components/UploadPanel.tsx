@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useApp } from "./AppShell";
 import { mLabel, monthStart, monthsOf } from "@/lib/format";
 import {
+  parseExport,
   parseLedger,
   parseSchedule,
   templateFilename,
@@ -12,9 +13,15 @@ import {
   type UploadKind,
 } from "@/lib/parse";
 import { downloadWorkbook } from "@/lib/download";
-import type { LedgerUploadRow, ScheduleUploadRow } from "@/lib/types";
+import type { ExportUploadRow, LedgerUploadRow, ScheduleUploadRow } from "@/lib/types";
 
-type Pending = ParsedUpload<LedgerUploadRow> | ParsedUpload<ScheduleUploadRow>;
+type Pending = ParsedUpload<LedgerUploadRow> | ParsedUpload<ScheduleUploadRow> | ParsedUpload<ExportUploadRow>;
+
+const PARSER: Record<UploadKind, (buf: ArrayBuffer, month: string, existing: number) => Pending> = {
+  ledger: parseLedger,
+  schedule: parseSchedule,
+  export: parseExport,
+};
 
 const COPY: Record<UploadKind, { title: string; note: string; rpc: string }> = {
   ledger: {
@@ -28,6 +35,12 @@ const COPY: Record<UploadKind, { title: string; note: string; rpc: string }> = {
     note:
       "Excel or CSV with columns Serial No, Invoice Date, Tax Invoice No, Supplier’s TIN, Name of the Supplier, Description, Value of purchase, VAT Amount. If the file has a Month column, only the chosen month’s rows are taken. A blank VAT Amount is taken as 18% of the value.",
     rpc: "replace_schedule_month",
+  },
+  export: {
+    title: "Upload a month’s export sales report",
+    note:
+      "Excel or CSV with columns Invoice No, Month, Amount FC (FOB) USD / EUR, Ex.rate, Net Sales (A). The customs columns (Cusdec No, Date, Month, Currency Type, Ex. Rate Custom LKR, Invoice Value as Per USD / EUR, Custom Value) and Short Shipment, Sales Reversed and Updated in Custom Report may be included or filled in on the table afterwards. If the file has a Month column, only the chosen month’s rows are taken. Customs details already entered are kept where the file leaves them blank.",
+    rpc: "replace_export_month",
   },
 };
 
@@ -73,9 +86,7 @@ export default function UploadPanel({
       try {
         const buf = rd.result as ArrayBuffer;
         const existing = existingCount(month);
-        setPending(
-          kind === "ledger" ? parseLedger(buf, month, existing) : parseSchedule(buf, month, existing),
-        );
+        setPending(PARSER[kind](buf, month, existing));
       } catch (err) {
         setParseError(err instanceof Error ? err.message : "Could not read the file.");
       }

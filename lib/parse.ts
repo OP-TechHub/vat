@@ -5,9 +5,9 @@
  */
 import * as XLSX from "xlsx";
 import { MN, mLabel, fmt, sum, cents } from "./format";
-import type { LedgerUploadRow, ScheduleUploadRow } from "./types";
+import type { ExportUploadRow, LedgerUploadRow, ScheduleUploadRow } from "./types";
 
-export type UploadKind = "ledger" | "schedule";
+export type UploadKind = "ledger" | "schedule" | "export";
 
 /**
  * Excel serial number or dd.mm.yyyy / dd/mm/yyyy / yyyy-mm-dd text -> "YYYY-MM-DD".
@@ -47,6 +47,15 @@ export const num = (v: unknown): number => {
   return isNaN(n) ? 0 : cents(n);
 };
 
+/** Cell to a number, or null when blank or not numeric. `places` decimals (default 2). */
+export const numOrNull = (v: unknown, places = 2): number | null => {
+  if (v == null || String(v).trim() === "") return null;
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(/,/g, ""));
+  if (isNaN(n)) return null;
+  const p = 10 ** places;
+  return Math.round(n * p) / p;
+};
+
 export interface ParsedUpload<R> {
   kind: UploadKind;
   month: string; // YYYY-MM
@@ -61,11 +70,17 @@ export class UploadError extends Error {}
 
 type Cell = string | number | boolean | Date | null;
 
+const SHEET_NAME: Record<UploadKind, RegExp> = {
+  ledger: /invoice listing/i,
+  schedule: /input/i,
+  export: /export/i,
+};
+
 function readSheet(buf: ArrayBuffer | Uint8Array, kind: UploadKind) {
   // raw: true keeps CSV cells as written, so "01/05/2026" is not re-read as a US date (5 January).
   // Workbook cells already carry their types and are unaffected.
   const wb = XLSX.read(buf, { type: "array", cellDates: false, raw: true });
-  const want = kind === "ledger" ? /invoice listing/i : /input/i;
+  const want = SHEET_NAME[kind];
   const name = wb.SheetNames.find((n) => want.test(n)) || wb.SheetNames[0];
   if (!name) throw new UploadError("The file has no worksheets.");
   const A = XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[name], { header: 1, raw: true, defval: "" });
@@ -218,6 +233,116 @@ export function parseSchedule(
   };
 }
 
+/** True when a cell holds a month name or "Jul 2025"-style label for the given month key (first 3 letters). */
+const sameMonth = (cell: unknown, month: string) => {
+  const s = str(cell as Cell);
+  if (!s) return false;
+  const ab = MN[+month.slice(5) - 1].toUpperCase();
+  if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7) === month;
+  if (typeof cell === "number") return xlDate(cell).slice(0, 7) === month;
+  return s.toUpperCase().slice(0, 3) === ab;
+};
+
+/**
+ * Parse an export reconciliation sheet (the monthly export sales report with its customs columns).
+ * Only the "Details in sales report" columns are required: Invoice No, Amount FC (FOB), Ex.rate,
+ * Net Sales. The customs and difference columns are taken when present and may be left blank.
+ * If the file has a Month column holding several months, only the chosen month's rows are kept.
+ * Blank Net Sales is taken as Amount x Ex.rate; blank Custom Value as invoice value x customs rate.
+ */
+export function parseExport(
+  buf: ArrayBuffer | Uint8Array,
+  month: string,
+  existing = 0,
+): ParsedUpload<ExportUploadRow> {
+  const { name, A } = readSheet(buf, "export");
+  const { hi, col } = findHeader(A, /^\s*invoice no/i, "Invoice No", name);
+  const c = {
+    inv: col(/^invoice no/),
+    m: col(/^month$/, /^month/),
+    amt: col(/^amount/, /fob/),
+    rate: col(/^ex\.? ?rate$/, /^ex\.? ?rate(?!.*custom)/),
+    net: col(/net sales/),
+    cusdec: col(/cusdec/),
+    date: col(/^date/),
+    cmonth: col(/^month/), // first Month column is the sales one; customs Month found below
+    cur: col(/currency/),
+    crate: col(/ex\.? ?rate.*custom/, /custom.*rate/),
+    cval: col(/invoice val/),
+    cvalue: col(/^custom value/, /customs? value/),
+    short: col(/short ship/),
+    rev: col(/sales rev/),
+    upd: col(/updated in custom/),
+  };
+  // The sheet has two "Month" columns: sales report, then customs. Use the second if present.
+  {
+    const H = A[hi].map((x) => String(x).toLowerCase().replace(/\s+/g, " ").trim());
+    const months = H.map((h, i) => (/^month$/.test(h) ? i : -1)).filter((i) => i >= 0);
+    c.cmonth = months.length > 1 ? months[1] : -1;
+  }
+  if (c.inv < 0 || c.amt < 0)
+    throw new UploadError("The file needs Invoice No and Amount FC (FOB) columns.");
+  const body = A.slice(hi + 1);
+  const multi =
+    c.m >= 0 && new Set(body.map((r) => str(r[c.m]).toUpperCase().slice(0, 3)).filter(Boolean)).size > 1;
+  const rows: ExportUploadRow[] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
+  for (const r of body) {
+    const inv = str(r[c.inv]);
+    if (!inv) continue;
+    // Subtotal rows carry a month label ("July 2025") where the invoice number would be.
+    if (/^[a-z]{3,9}\s+\d{4}$/i.test(inv) || /^total/i.test(inv)) continue;
+    if (c.m >= 0 && !str(r[c.m])) {
+      skipped++;
+      continue;
+    }
+    if (multi && !sameMonth(r[c.m], month)) {
+      skipped++;
+      continue;
+    }
+    if (seen.has(inv)) {
+      skipped++;
+      continue;
+    }
+    seen.add(inv);
+    const amount = num(r[c.amt]);
+    const rate = c.rate < 0 ? null : numOrNull(r[c.rate], 6);
+    const net = c.net < 0 ? null : numOrNull(r[c.net]);
+    const crate = c.crate < 0 ? null : numOrNull(r[c.crate], 6);
+    const cval = c.cval < 0 ? null : numOrNull(r[c.cval]);
+    const cvalue = c.cvalue < 0 ? null : numOrNull(r[c.cvalue]);
+    const cur = c.cur < 0 ? "" : str(r[c.cur]).toUpperCase();
+    rows.push({
+      invoice_no: inv,
+      amount_fc: amount,
+      ex_rate: rate,
+      net_sales: net ?? (rate != null ? cents(amount * rate) : 0),
+      cusdec_no: c.cusdec < 0 ? "" : xlText(r[c.cusdec]),
+      cusdec_date: c.date < 0 ? "" : xlText(r[c.date]),
+      cusdec_month: c.cmonth < 0 ? "" : xlText(r[c.cmonth]),
+      currency_type: cur === "EUR" ? "EUR" : cur === "USD" ? "USD" : "",
+      custom_ex_rate: crate,
+      custom_invoice_value: cval,
+      custom_value: cvalue ?? (crate != null && cval != null ? cents(crate * cval) : null),
+      short_shipment: c.short < 0 ? null : numOrNull(r[c.short]),
+      sales_reversed: c.rev < 0 ? null : numOrNull(r[c.rev]),
+      updated_in_custom_report: c.upd < 0 ? "" : xlText(r[c.upd]),
+    });
+  }
+  if (!rows.length) throw noRows(month, name, skipped);
+  const total = cents(sum(rows, (r) => r.net_sales));
+  return {
+    kind: "export",
+    month,
+    sheet: name,
+    rows,
+    skipped,
+    total,
+    text: previewText("export", name, rows.length, month, total, skipped, existing),
+  };
+}
+
 function noRows(month: string, sheet: string, skipped: number) {
   return new UploadError(
     `No rows for ${mLabel(month)} were found in sheet “${sheet}”` +
@@ -236,24 +361,56 @@ function previewText(
   existing: number,
 ) {
   return (
-    `Sheet “${sheet}”: ${n} rows for ${mLabel(month)}, ${kind === "ledger" ? "input VAT " : "VAT "}${fmt(total)}.` +
+    `Sheet “${sheet}”: ${n} rows for ${mLabel(month)}, ${
+      kind === "ledger" ? "input VAT " : kind === "export" ? "net sales " : "VAT "
+    }${fmt(total)}.` +
     (skipped ? ` ${skipped} rows outside this month were left out.` : "") +
     (existing ? ` Saving replaces the ${existing} rows already held for this month.` : "")
   );
 }
 
+const TEMPLATE: Record<UploadKind, { sheet: string; file: string; head: string[] }> = {
+  ledger: {
+    sheet: "Invoice Listing",
+    file: "Ledger invoice list",
+    head: ["Invoice No.", "Posting Date", "Vendor Name", "External Document No.", "Description", "Amount (LCY)", "Source Currency Amount"],
+  },
+  schedule: {
+    sheet: "IRD Input Schedule",
+    file: "IRD input schedule",
+    head: ["Month", "Serial No", "Invoice Date", "Tax Invoice No", "Supplier's TIN", "Name of the Supplier", "Description", "Value of purchase", "VAT Amount"],
+  },
+  export: {
+    sheet: "Export Reconciliation",
+    file: "Export reconciliation",
+    head: [
+      "Invoice No",
+      "Month",
+      "Amount FC (FOB) USD / EUR",
+      "Ex.rate",
+      "Net Sales (A)",
+      "Cusdec No",
+      "Date",
+      "Month",
+      "Currency Type",
+      "Ex. Rate Custom LKR",
+      "Invoice Value as Per USD / EUR",
+      "Custom Value",
+      "Short Shipment (3)",
+      "Sales Reversed in the Month (4)",
+      "Updated in Custom Report",
+    ],
+  },
+};
+
 /** Build the blank upload template workbook for download. */
 export function templateWorkbook(kind: UploadKind): XLSX.WorkBook {
-  const led = kind === "ledger";
-  const head = led
-    ? ["Invoice No.", "Posting Date", "Vendor Name", "External Document No.", "Description", "Amount (LCY)", "Source Currency Amount"]
-    : ["Month", "Serial No", "Invoice Date", "Tax Invoice No", "Supplier's TIN", "Name of the Supplier", "Description", "Value of purchase", "VAT Amount"];
+  const t = TEMPLATE[kind];
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([head]);
-  ws["!cols"] = head.map((h) => ({ wch: Math.max(14, h.length + 4) }));
-  XLSX.utils.book_append_sheet(wb, ws, led ? "Invoice Listing" : "IRD Input Schedule");
+  const ws = XLSX.utils.aoa_to_sheet([t.head]);
+  ws["!cols"] = t.head.map((h) => ({ wch: Math.max(14, h.length + 4) }));
+  XLSX.utils.book_append_sheet(wb, ws, t.sheet);
   return wb;
 }
 
-export const templateFilename = (kind: UploadKind) =>
-  (kind === "ledger" ? "Ledger invoice list" : "IRD input schedule") + " template.xlsx";
+export const templateFilename = (kind: UploadKind) => TEMPLATE[kind].file + " template.xlsx";

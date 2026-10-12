@@ -14,18 +14,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Db } from "@/lib/supabase/schema";
 import { createClient } from "@/lib/supabase/client";
-import { loadInvoices, loadReturns, loadRole, loadScheduleLines } from "@/lib/data";
+import { loadExportSales, loadInvoices, loadReturns, loadRole, loadScheduleLines } from "@/lib/data";
 import { monthsOf, taxYearOf, yearLabel } from "@/lib/format";
 import { pm } from "@/lib/reports";
 import { exportWorkbook } from "@/lib/export";
 import { downloadWorkbook } from "@/lib/download";
-import type { Company, Invoice, Role, ScheduleLine, VatReturn } from "@/lib/types";
+import type { Company, ExportSale, Invoice, Role, ScheduleLine, VatReturn } from "@/lib/types";
 
 export interface YearData {
   /** Invoices posted in the year, plus ones from other years claimed in this year. */
   invoices: Invoice[];
   schedule: ScheduleLine[];
   returns: VatReturn[];
+  /** Export reconciliation rows for sales-report months in the year. */
+  exports: ExportSale[];
 }
 
 export interface AppState {
@@ -49,6 +51,7 @@ export interface AppState {
   reload: () => Promise<void>;
   patchInvoice: (inv: Invoice) => void;
   patchScheduleLine: (line: ScheduleLine) => void;
+  patchExportSale: (row: ExportSale) => void;
   patchReturn: (r: VatReturn) => void;
   flash: (text: string | null, err?: boolean) => void;
 }
@@ -61,7 +64,7 @@ export function useApp(): AppState {
   return v;
 }
 
-const EMPTY: YearData = { invoices: [], schedule: [], returns: [] };
+const EMPTY: YearData = { invoices: [], schedule: [], returns: [], exports: [] };
 const LS_COMPANY = "vat.company";
 const LS_YEAR = "vat.year";
 
@@ -71,6 +74,7 @@ const TABS: { href: string; label: string; admin?: boolean }[] = [
   { href: "/summary", label: "Summary" },
   { href: "/invoices", label: "Invoice listing" },
   { href: "/schedule", label: "IRD input schedule" },
+  { href: "/exports", label: "Export reconciliation" },
   { href: "/returns", label: "VAT reconciliation" },
   { href: "/members", label: "Members", admin: true },
 ];
@@ -140,14 +144,15 @@ export default function AppShell({
     setLoading(true);
     setError(null);
     try {
-      const [invoices, schedule, returns, r] = await Promise.all([
+      const [invoices, schedule, returns, exports, r] = await Promise.all([
         loadInvoices(supabase, companyId, year),
         loadScheduleLines(supabase, companyId, year),
         loadReturns(supabase, companyId, year),
+        loadExportSales(supabase, companyId, year),
         loadRole(supabase, companyId, user.id),
       ]);
       if (id !== reqId.current) return;
-      setData({ invoices, schedule, returns });
+      setData({ invoices, schedule, returns, exports });
       setRole(r);
     } catch (e) {
       if (id !== reqId.current) return;
@@ -171,6 +176,9 @@ export default function AppShell({
   }, []);
   const patchScheduleLine = useCallback((line: ScheduleLine) => {
     setData((d) => ({ ...d, schedule: d.schedule.map((x) => (x.id === line.id ? line : x)) }));
+  }, []);
+  const patchExportSale = useCallback((row: ExportSale) => {
+    setData((d) => ({ ...d, exports: d.exports.map((x) => (x.id === row.id ? row : x)) }));
   }, []);
   const patchReturn = useCallback((r: VatReturn) => {
     setData((d) => {
@@ -196,7 +204,7 @@ export default function AppShell({
   }, [year]);
 
   function exportExcel() {
-    const { wb, filename } = exportWorkbook(year, data.invoices, data.schedule, data.returns);
+    const { wb, filename } = exportWorkbook(year, data.invoices, data.schedule, data.returns, data.exports);
     downloadWorkbook(wb, filename);
   }
 
@@ -219,6 +227,7 @@ export default function AppShell({
     reload,
     patchInvoice,
     patchScheduleLine,
+    patchExportSale,
     patchReturn,
     flash,
   };

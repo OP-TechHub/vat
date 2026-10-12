@@ -11,6 +11,7 @@ Stack: Next.js (App Router, TypeScript), Tailwind CSS, Supabase (Postgres, Auth,
 | `supabase/migrations/0001_init.sql` | Schema, derived views, RLS policies, upload functions |
 | `supabase/migrations/0002_members.sql` | Email lookup functions for the Members screen |
 | `supabase/migrations/0003_schedule_ledger_fields.sql` | Manual ledger availability / ledger reference columns on schedule lines |
+| `supabase/migrations/0004_export_sales.sql` | `export_sales` table and upload function for the Export reconciliation tab |
 | `lib/reports.ts`, `lib/export.ts` | Summary and reconciliation calculations, Excel export |
 | `supabase/seed.sql` | Oceanpick 2026/27 data (608 invoices, 244 schedule lines, April return) |
 | `templates/` | Blank upload templates (also downloadable from the app) |
@@ -39,8 +40,9 @@ In the dashboard open **SQL Editor → New query**, then:
 1. Paste the whole of `supabase/migrations/0001_init.sql` and click **Run**. It creates the `vat_claims` schema, the tables, views, policies and upload functions, and grants the API roles access to the schema.
 2. Paste the whole of `supabase/migrations/0002_members.sql` and click **Run**. It adds two functions the Members screen uses to look up logins by email on the database side (the browser cannot read `auth.users`).
 3. Paste the whole of `supabase/migrations/0003_schedule_ledger_fields.sql` and click **Run**. It adds the manual "Ledger availability" and "Ledger reference" columns to the IRD input schedule, rebuilds the `schedule_line_match` view and makes schedule re-uploads keep those two fields. Run it on existing projects too.
-4. Paste the whole of `supabase/seed.sql` and click **Run**. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
-5. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
+4. Paste the whole of `supabase/migrations/0004_export_sales.sql` and click **Run**. It adds the `export_sales` table and upload function behind the Export reconciliation tab. Run it on existing projects too.
+5. Paste the whole of `supabase/seed.sql` and click **Run**. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
+6. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
 
 Or, with the Supabase CLI installed and logged in:
 
@@ -123,6 +125,7 @@ vercel --prod
 
 - **Ledger invoice list**: sheet named "Invoice Listing" (or the first sheet). Columns are matched by heading text anywhere in the first 15 rows: Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY), Source Currency Amount. Only rows posted in the chosen month are kept; duplicate invoice numbers are summed. Saving replaces that month's rows but keeps original-invoice marks and claimed-month overrides by invoice number.
 - **IRD input schedule**: sheet whose name contains "Input" (or the first sheet). Columns: Month, Serial No, Invoice Date, Tax Invoice No, Supplier's TIN, Name of the Supplier, Description, Value of purchase, VAT Amount. If the Month column holds several months, only the chosen month's rows are kept. A blank VAT Amount is taken as 18% of the value. Each saved line has two hand-entered columns, **Ledger availability** (None by default, Available in ledger, Not available in ledger) and **Ledger reference** (free text); re-uploading a month keeps both for lines with the same tax invoice number.
+- **Export sales report** (Export reconciliation tab): sheet whose name contains "Export" (or the first sheet). Required columns: Invoice No, Amount FC (FOB) USD / EUR, Ex.rate, Net Sales (A); a Month column is used to keep only the chosen month when the file holds several. Optional customs and difference columns: Cusdec No, Date, Month (customs), Currency Type, Ex. Rate Custom LKR, Invoice Value as Per USD / EUR, Custom Value, Short Shipment (3), Sales Reversed in the Month (4), Updated in Custom Report. A blank Net Sales is Amount × Ex.rate; a blank Custom Value is invoice value × customs rate. Subtotal rows (a month label in the Invoice No column) are ignored. Saving replaces the month but keeps customs details already entered for the same invoice number where the file leaves them blank. Editors can then fill in or correct the customs and difference columns on the table; Exchange Difference (1) is always customs value less net sales. The tab shows any range of months in the tax year with a subtotal per month.
 - Dates may be Excel serials or `dd.mm.yyyy`, `dd/mm/yyyy`, `yyyy-mm-dd` text. `.xlsx`, `.xls` and `.csv` are accepted. CSV cells are read as written, so `01/05/2026` is 1 May.
 
 ## Security notes

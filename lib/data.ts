@@ -1,5 +1,5 @@
 import type { Db } from "./supabase/schema";
-import type { Company, Invoice, Role, ScheduleLine, VatReturn } from "./types";
+import type { Company, ExportSale, Invoice, Role, ScheduleLine, VatReturn } from "./types";
 import { yearRange } from "./format";
 
 const PAGE = 1000;
@@ -89,6 +89,29 @@ export function loadScheduleLines(sb: Db, companyId: string, year: number): Prom
       .order("id")
       .range(a, b),
   );
+}
+
+export function loadExportSales(sb: Db, companyId: string, year: number): Promise<ExportSale[]> {
+  const { from, to } = yearRange(year);
+  return fetchAll<ExportSale>((a, b) =>
+    sb
+      .from("export_sales")
+      .select("*")
+      .eq("company_id", companyId)
+      .gte("sales_month", from)
+      .lte("sales_month", to)
+      .order("sales_month")
+      .order("invoice_no")
+      .order("id")
+      .range(a, b),
+  );
+}
+
+/** Re-read one export sale after an inline edit. */
+export async function reloadExportSale(sb: Db, id: string): Promise<ExportSale> {
+  const { data, error } = await sb.from("export_sales").select("*").eq("id", id).single();
+  if (error) throw new Error(error.message);
+  return data as ExportSale;
 }
 
 export async function loadReturns(sb: Db, companyId: string, year: number): Promise<VatReturn[]> {

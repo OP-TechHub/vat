@@ -78,6 +78,66 @@ export interface VatReturn {
 
 export type ReturnField = Exclude<keyof VatReturn, "company_id" | "return_month" | "updated_at" | "updated_by">;
 
+export type CurrencyType = "USD" | "EUR";
+
+/** Row of the export_sales table: one export invoice per sales-report month. */
+export interface ExportSale {
+  id: string;
+  company_id: string;
+  sales_month: string; // YYYY-MM-DD (first of month)
+  invoice_no: string;
+  amount_fc: number;
+  ex_rate: number | null;
+  net_sales: number;
+  cusdec_no: string | null;
+  cusdec_date: string | null;
+  cusdec_month: string | null;
+  currency_type: CurrencyType;
+  custom_ex_rate: number | null;
+  custom_invoice_value: number | null;
+  custom_value: number | null;
+  short_shipment: number | null;
+  sales_reversed: number | null;
+  updated_in_custom_report: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+/** Fields of an export sale that editors may change inline. */
+export type ExportEditable = Pick<
+  ExportSale,
+  | "cusdec_no"
+  | "cusdec_date"
+  | "cusdec_month"
+  | "currency_type"
+  | "custom_ex_rate"
+  | "custom_invoice_value"
+  | "custom_value"
+  | "short_shipment"
+  | "sales_reversed"
+  | "updated_in_custom_report"
+>;
+
+/** Parsed export-reconciliation row ready for replace_export_month. Null = not given in the file. */
+export interface ExportUploadRow {
+  invoice_no: string;
+  amount_fc: number;
+  ex_rate: number | null;
+  net_sales: number;
+  cusdec_no: string;
+  cusdec_date: string;
+  cusdec_month: string;
+  currency_type: string;
+  custom_ex_rate: number | null;
+  custom_invoice_value: number | null;
+  custom_value: number | null;
+  short_shipment: number | null;
+  sales_reversed: number | null;
+  updated_in_custom_report: string;
+}
+
 /** Parsed ledger row ready for replace_ledger_month. */
 export interface LedgerUploadRow {
   invoice_no: string;
