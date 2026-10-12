@@ -5,7 +5,7 @@
  */
 import * as XLSX from "xlsx";
 import { MN, mLabel, fmt, sum, cents } from "./format";
-import type { ExportUploadRow, LedgerUploadRow, ScheduleUploadRow } from "./types";
+import type { ExportUploadRow, LedgerUploadRow, ReturnPeriodRow, ScheduleUploadRow } from "./types";
 
 export type UploadKind = "ledger" | "schedule" | "export";
 
@@ -340,6 +340,105 @@ export function parseExport(
     skipped,
     total,
     text: previewText("export", name, rows.length, month, total, skipped, existing),
+  };
+}
+
+/** Cage code (column B of the workbook) -> vat_returns field. */
+const CAGE_FIELD: Record<string, Exclude<keyof ReturnPeriodRow, "return_month" | "submitted_on">> = {
+  D: "zero_rated",
+  E: "exempt",
+  H: "imports_value",
+  "4": "imports_deferred",
+  "5": "imports_upfront",
+  I: "local_value",
+  "6": "local_tax",
+  "8": "disallowed",
+  "10": "brought_forward",
+};
+
+export interface ParsedReturns {
+  sheet: string;
+  /** Ascending by period. */
+  periods: ReturnPeriodRow[];
+  text: string;
+}
+
+/**
+ * Parse the "VAT Return_Upload" workbook: one column per taxable period, one row per cage.
+ * Row "Taxable period" holds the first day of each period; "Date of submission" the acknowledgement
+ * date; the cage rows are matched by the code in column B (D, E, H, 4, 5, I, 6, 8, 10).
+ * Periods with no figures in any of those cages are left out. The first sheet is used.
+ */
+export function parseReturnWorkbook(buf: ArrayBuffer | Uint8Array): ParsedReturns {
+  const wb = XLSX.read(buf, { type: "array", cellDates: false, raw: true });
+  const name = wb.SheetNames[0];
+  if (!name) throw new UploadError("The file has no worksheets.");
+  const A = XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[name], { header: 1, raw: true, defval: "" });
+  const rowIdx = (re: RegExp) => A.findIndex((r) => re.test(str(r[0])));
+  const pi = rowIdx(/^taxable period/i);
+  if (pi < 0)
+    throw new UploadError(`Could not find the “Taxable period” row in sheet “${name}”. Expected the VAT Return_Upload layout.`);
+  const si = rowIdx(/date of submission/i);
+  const cageRows: Record<string, number> = {};
+  A.forEach((r, i) => {
+    const code = str(r[1]).toUpperCase();
+    if (i !== pi && CAGE_FIELD[code] !== undefined && cageRows[code] === undefined) cageRows[code] = i;
+  });
+  if (Object.keys(cageRows).length < 3)
+    throw new UploadError(`Could not find the cage codes (D, E, H, 4, 5, I, 6, 8, 10) in column B of sheet “${name}”.`);
+
+  const periods: ReturnPeriodRow[] = [];
+  const seen = new Set<string>();
+  const prow = A[pi];
+  for (let c = 1; c < prow.length; c++) {
+    const v = prow[c];
+    if (v === "" || v == null) continue;
+    const d = xlDate(v);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    const month = d.slice(0, 7) + "-01";
+    if (seen.has(month)) continue;
+    const row: ReturnPeriodRow = {
+      return_month: month,
+      submitted_on: null,
+      zero_rated: 0,
+      exempt: 0,
+      imports_value: 0,
+      imports_deferred: 0,
+      imports_upfront: 0,
+      local_value: 0,
+      local_tax: 0,
+      disallowed: 0,
+      brought_forward: 0,
+    };
+    let any = false;
+    for (const [code, ri] of Object.entries(cageRows)) {
+      const cell = A[ri][c];
+      if (cell === "" || cell == null) continue;
+      any = true;
+      row[CAGE_FIELD[code]] = num(cell);
+    }
+    if (si >= 0) {
+      const sv = A[si][c];
+      if (sv !== "" && sv != null) {
+        const sd = xlDate(sv);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(sd)) row.submitted_on = sd;
+      }
+    }
+    if (!any && !row.submitted_on) continue;
+    seen.add(month);
+    periods.push(row);
+  }
+  if (!periods.length) throw new UploadError(`No periods with figures were found in sheet “${name}”.`);
+  periods.sort((a, b) => a.return_month.localeCompare(b.return_month));
+  const submitted = periods.filter((p) => p.submitted_on).length;
+  const first = mLabel(periods[0].return_month.slice(0, 7));
+  const last = mLabel(periods[periods.length - 1].return_month.slice(0, 7));
+  return {
+    sheet: name,
+    periods,
+    text:
+      `Sheet “${name}”: ${periods.length} periods from ${first} to ${last}, ${submitted} with a submission date. ` +
+      "Saving replaces the cage figures and submission date of these periods; ledger figures already entered are kept.",
   };
 }
 

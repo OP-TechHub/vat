@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
-import { parseExport, parseLedger, parseSchedule, templateWorkbook, UploadError } from "@/lib/parse";
+import { parseExport, parseLedger, parseReturnWorkbook, parseSchedule, templateWorkbook, UploadError } from "@/lib/parse";
+import { monthsBetween, periodCode } from "@/lib/format";
 
 const root = path.resolve(__dirname, "..");
 const read = (p: string) => new Uint8Array(readFileSync(path.join(root, p)));
@@ -239,5 +240,74 @@ describe("parseExport", () => {
     expect(() => parseExport(read("templates/Export reconciliation template.xlsx"), "2026-04")).toThrow(
       /No rows for Apr 2026 were found in sheet “Export Reconciliation”\./,
     );
+  });
+});
+
+describe("parseReturnWorkbook", () => {
+  const serial = (iso: string) => Math.round((Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 864e5);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.aoa_to_sheet([
+      ["Period code", "", "2632", "2631", "2011", "bad"],
+      ["Taxable period", "", serial("2026-08-01"), serial("2026-07-01"), serial("2020-01-01"), "n/a"],
+      ["Date of submission (per IRD acknowledgement)", "", serial("2026-09-30"), serial("2026-08-31"), "", ""],
+      ["Output tax and supplies", "", "", "", "", ""],
+      ["Taxable supplies - value", "A", "", "", "", ""],
+      ["Zero rated supplies_Goods", "D", 60976633, 146625597, 1295000, 5],
+      ["Exempt supplies", "E", 10162699, 9006627, 8894288, ""],
+      ["Imports_Value", "H", 72242911, 56954833, 6709438, ""],
+      ["Imports_Deferred tax", "4", 12896924, 10196958, "", ""],
+      ["Imports_Upfront tax", "5", 106800, 54912, 536755, ""],
+      ["Local purchases_Value", "I", 14298989, 12397163, 633558, ""],
+      ["Local purchases_Tax", "6", 2573818, 2231489, 50685, ""],
+      ["Total (4+5+6)", "7", 15577542, 12483359, 587440, ""],
+      ["Disallowable input tax on imports, other purchases and adjustment", "8", 2225349, 722427, 512779, ""],
+      ["Brought forward input tax", "10", "", "", "", ""],
+    ]),
+    "VAT Reconciliation (2)",
+  );
+  const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+
+  it("reads one period per column, oldest first, with the submission date and the mapped cages", () => {
+    const p = parseReturnWorkbook(buf);
+    expect(p.periods.map((r) => r.return_month)).toEqual(["2020-01-01", "2026-07-01", "2026-08-01"]);
+    expect(p.periods[2]).toMatchObject({
+      submitted_on: "2026-09-30", zero_rated: 60976633, exempt: 10162699, imports_value: 72242911, imports_deferred: 12896924,
+      imports_upfront: 106800, local_value: 14298989, local_tax: 2573818, disallowed: 2225349, brought_forward: 0,
+    });
+    expect(p.periods[0]).toMatchObject({ submitted_on: null, imports_deferred: 0, local_tax: 50685 });
+    expect(p.text).toMatch(/3 periods from Jan 2020 to Aug 2026, 2 with a submission date/);
+  });
+
+  it("rejects a workbook without the Taxable period row", () => {
+    const other = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(other, XLSX.utils.aoa_to_sheet([["Invoice No", "Amount"], [1, 2]]), "Sheet1");
+    expect(() => parseReturnWorkbook(XLSX.write(other, { type: "array", bookType: "xlsx" }))).toThrow(/Taxable period/);
+  });
+
+  const real = path.join(root, "VAT Return_Upload 1.xlsx");
+  it.skipIf(!existsSync(real))("reads the VAT Return_Upload 1.xlsx workbook: 65 periods, Apr 2026 local tax 1,386,009", () => {
+    const p = parseReturnWorkbook(read("VAT Return_Upload 1.xlsx"));
+    expect(p.periods).toHaveLength(65);
+    expect(p.periods[0].return_month).toBe("2020-01-01");
+    expect(p.periods[p.periods.length - 1].return_month).toBe("2026-08-01");
+    const apr = p.periods.find((r) => r.return_month === "2026-04-01")!;
+    expect(apr.local_tax).toBe(1386009);
+    expect(apr.submitted_on).toBe("2026-05-31");
+  });
+});
+
+describe("periodCode / monthsBetween", () => {
+  it("YYQM codes match the workbook", () => {
+    expect(periodCode("2026-08")).toBe("2632");
+    expect(periodCode("2026-07")).toBe("2631");
+    expect(periodCode("2020-01")).toBe("2011");
+    expect(periodCode("2020-10")).toBe("2041");
+    expect(periodCode("2025-12")).toBe("2543");
+  });
+  it("lists months inclusive across a year end", () => {
+    expect(monthsBetween("2025-11", "2026-02")).toEqual(["2025-11", "2025-12", "2026-01", "2026-02"]);
+    expect(monthsBetween("2026-03", "2026-02")).toEqual([]);
   });
 });

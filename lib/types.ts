@@ -72,11 +72,44 @@ export interface VatReturn {
   ledger_exports: number;
   ledger_local_sales: number;
   ledger_imports: number;
+  /** Date of submission per the IRD acknowledgement, YYYY-MM-DD. */
+  submitted_on?: string | null;
   updated_at?: string;
   updated_by?: string | null;
 }
 
-export type ReturnField = Exclude<keyof VatReturn, "company_id" | "return_month" | "updated_at" | "updated_by">;
+export type DocumentKind = "return" | "acknowledgement";
+
+/** Row of return_documents: a filed return or IRD acknowledgement held in storage for a period. */
+export interface ReturnDocument {
+  company_id: string;
+  return_month: string; // YYYY-MM-DD
+  kind: DocumentKind;
+  path: string;
+  filename: string;
+  uploaded_at: string;
+  uploaded_by: string | null;
+}
+
+/** Cage figures of one taxable period parsed from the "VAT Return_Upload" workbook, ready to upsert. */
+export interface ReturnPeriodRow {
+  return_month: string; // YYYY-MM-DD
+  submitted_on: string | null;
+  zero_rated: number;
+  exempt: number;
+  imports_value: number;
+  imports_deferred: number;
+  imports_upfront: number;
+  local_value: number;
+  local_tax: number;
+  disallowed: number;
+  brought_forward: number;
+}
+
+export type ReturnField = Exclude<
+  keyof VatReturn,
+  "company_id" | "return_month" | "submitted_on" | "updated_at" | "updated_by"
+>;
 
 export type CurrencyType = "USD" | "EUR";
 

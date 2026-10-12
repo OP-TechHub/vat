@@ -17,6 +17,7 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 | `invoice_claim_status` (view) | Ledger invoices with derived `claim_status`, `claim_month`, `auto_claim_month` |
 | `schedule_line_match` (view) | Schedule lines with the matching ledger invoice number, if any |
 | `export_sales` | Export sales report lines with customs details, per sales-report month (migration 0004) |
+| `return_documents` | Filed return and IRD acknowledgement documents per period, stored in the `vat-claims` bucket (migration 0005) |
 | `replace_ledger_month`, `replace_schedule_month`, `replace_export_month` (RPC) | Atomic replace of one month on upload |
 
 `supabase/seed.sql` loads Oceanpick's 2026/27 data: 608 ledger invoices (Apr–Aug 2026), 244 schedule lines, the April return.
@@ -51,6 +52,10 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 5. **VAT reconciliation**
    - Form per month for the `vat_returns` fields.
    - Table with months as columns: entered lines; total input tax (4+5+6); disallowable by exempt ratio = total × E ÷ (D+E); allowable (7−8); available (9+10); differences return vs ledger for exports, local sales, imports; schedule VAT total vs local purchases tax; claimed from ledger invoices. Differences under 1 rupee count as agreed; larger ones are highlighted.
+5a. **Return filing** (register of every taxable period from Jan 2020 to the current month, newest first, not limited to the tax-year selector)
+   - Columns: Period code (IRD YYQM, e.g. Aug 2026 = 2632), Taxable period, Submitted on (per IRD acknowledgement), Data uploaded (Yes/No), Return uploaded (Yes/No), Acknowledgement uploaded (Yes/No). Filter: all periods, or only those with something missing.
+   - Data uploaded is Yes when a `vat_returns` row exists for the period. Editors load the "VAT Return_Upload" workbook here (preview, then save): cages D, E, H, 4, 5, I, 6, 8, 10 and the submission date for every period in the file, upserted by period; ledger figures are kept.
+   - Return uploaded / Acknowledgement uploaded are Yes when a document is held for the period in the private `vat-claims` storage bucket (table `return_documents`). Members can open a document through a signed link; editors upload, replace and remove. Storage policies mirror the company roles.
 6. **Export to Excel**: Invoice Listing (with status and claim month), IRD Submitted Input, VAT Returns.
 7. **Members** (admin only): invite by email, set role, remove.
 

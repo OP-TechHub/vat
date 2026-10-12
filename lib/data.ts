@@ -1,5 +1,5 @@
 import type { Db } from "./supabase/schema";
-import type { Company, ExportSale, Invoice, Role, ScheduleLine, VatReturn } from "./types";
+import type { Company, ExportSale, Invoice, ReturnDocument, Role, ScheduleLine, VatReturn } from "./types";
 import { yearRange } from "./format";
 
 const PAGE = 1000;
@@ -125,6 +125,25 @@ export async function loadReturns(sb: Db, companyId: string, year: number): Prom
     .order("return_month");
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+export interface FilingData {
+  /** Every return held for the company, any year: month and submission date only. */
+  returns: Pick<VatReturn, "return_month" | "submitted_on">[];
+  documents: ReturnDocument[];
+}
+
+/** Filing register inputs for every period, not limited to the selected tax year. */
+export async function loadFiling(sb: Db, companyId: string): Promise<FilingData> {
+  const [returns, documents] = await Promise.all([
+    fetchAll<Pick<VatReturn, "return_month" | "submitted_on">>((a, b) =>
+      sb.from("vat_returns").select("return_month,submitted_on").eq("company_id", companyId).order("return_month").range(a, b),
+    ),
+    fetchAll<ReturnDocument>((a, b) =>
+      sb.from("return_documents").select("*").eq("company_id", companyId).order("return_month").order("kind").range(a, b),
+    ),
+  ]);
+  return { returns, documents };
 }
 
 /** Re-read one schedule line from the view after an inline edit so derived fields are fresh. */

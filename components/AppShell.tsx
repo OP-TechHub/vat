@@ -76,6 +76,7 @@ const TABS: { href: string; label: string; admin?: boolean }[] = [
   { href: "/schedule", label: "IRD input schedule" },
   { href: "/exports", label: "Export reconciliation" },
   { href: "/returns", label: "VAT reconciliation" },
+  { href: "/filing", label: "Return filing" },
   { href: "/members", label: "Members", admin: true },
 ];
 

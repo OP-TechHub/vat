@@ -49,6 +49,31 @@ export const yearRange = (year: number): { from: string; to: string } => ({
 /** First day of a month key as an ISO date, for date columns. */
 export const monthStart = (k: string): string => k.slice(0, 7) + "-01";
 
+/** Month keys from `from` to `to` inclusive ("YYYY-MM"), ascending. Empty when `to` is before `from`. */
+export const monthsBetween = (from: string, to: string): string[] => {
+  const out: string[] = [];
+  let y = +from.slice(0, 4);
+  let m = +from.slice(5, 7);
+  for (let i = 0; i < 1200; i++) {
+    const k = y + "-" + String(m).padStart(2, "0");
+    if (k > to) break;
+    out.push(k);
+    if (++m > 12) {
+      m = 1;
+      y++;
+    }
+  }
+  return out;
+};
+
+/** IRD taxable period code YYQM: two-digit year, quarter, month within the quarter. "2026-08" -> "2632". */
+export const periodCode = (k: string): string => {
+  const y = +k.slice(0, 4) % 100;
+  const m = +k.slice(5, 7);
+  const q = Math.ceil(m / 3);
+  return String(y).padStart(2, "0") + q + (m - 3 * (q - 1));
+};
+
 /** Month key of an ISO date ("YYYY-MM-DD" -> "YYYY-MM"). */
 export const monthKey = (d: string | null | undefined): string => (d ? d.slice(0, 7) : "");
 
