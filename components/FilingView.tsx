@@ -269,7 +269,7 @@ export default function FilingView() {
         </table>
       </div>
       <div className="note">
-        Period code is the IRD format YYQM (year, quarter, month within the quarter). Data uploaded is Yes when the
+        Period code is the IRD code for the taxable period, as on the return. Data uploaded is Yes when the
         period’s return figures are held; load the “VAT Return_Upload” workbook or enter figures on the{" "}
         <Link href="/returns" className="underline">
           VAT reconciliation
