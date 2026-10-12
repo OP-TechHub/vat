@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useApp } from "./AppShell";
+import BulkDocumentUpload from "./BulkDocumentUpload";
 import { mLabel, monthKey, monthsBetween, periodCode } from "@/lib/format";
 import { loadFiling, type FilingData } from "@/lib/data";
 import { DOC_ACCEPT, DOC_LABEL, documentUrl, isMissingTable, removeDocument, uploadDocument } from "@/lib/documents";
@@ -169,6 +170,10 @@ export default function FilingView() {
 
   return (
     <>
+      {canWrite && filing && (
+        <BulkDocumentUpload periods={periodKeys} existing={filing.documents} onDone={() => void load()} />
+      )}
+
       <input ref={docFileRef} type="file" accept={DOC_ACCEPT} className="hidden" onChange={(e) => void onDocFile(e)} />
 
       <div className="bar">

@@ -10,3 +10,7 @@ next-env.d.ts
 .vercel
 .DS_Store
 npm-debug.log*
+
+# Client data kept locally for uploads; never commit
+Standard Named/
+VAT Return_Upload*.xlsx

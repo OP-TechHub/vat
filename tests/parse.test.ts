@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
-import { parseExport, parseLedger, parseReturnWorkbook, parseSchedule, templateWorkbook, UploadError } from "@/lib/parse";
+import { parseDocumentIndex, parseExport, parseLedger, parseReturnWorkbook, parseSchedule, templateWorkbook, UploadError } from "@/lib/parse";
+import { kindFromText, kindsFromText, matchDocuments, missingFiles, periodFromText } from "@/lib/matchDocuments";
 import { monthsBetween, periodCode } from "@/lib/format";
 
 const root = path.resolve(__dirname, "..");
@@ -316,5 +317,93 @@ describe("periodCode / monthsBetween", () => {
   it("lists months inclusive across a year end", () => {
     expect(monthsBetween("2025-11", "2026-02")).toEqual(["2025-11", "2025-12", "2026-01", "2026-02"]);
     expect(monthsBetween("2026-03", "2026-02")).toEqual([]);
+  });
+});
+
+describe("matching documents to periods", () => {
+  it("reads a period from file names in several shapes", () => {
+    expect(periodFromText("VAT Return 2026-08.pdf")).toBe("2026-08");
+    expect(periodFromText("Ack_202608.pdf")).toBe("2026-08");
+    expect(periodFromText("08-2026 return.pdf")).toBe("2026-08");
+    expect(periodFromText("VAT Return Aug 2026.pdf")).toBe("2026-08");
+    expect(periodFromText("August_2026_ack.pdf")).toBe("2026-08");
+    expect(periodFromText("2026 Sep acknowledgement.pdf")).toBe("2026-09");
+    expect(periodFromText("Return 2632.pdf")).toBe("2026-08");
+    expect(periodFromText("Return 2011.pdf")).toBe("2020-01");
+    expect(periodFromText("65_2026-08_2632_VAT-ACK.pdf")).toBe("2026-08");
+    expect(periodFromText("Oceanpick VAT return.pdf")).toBeNull();
+  });
+  it("reads the document kinds: return, acknowledgement, both, or nothing for a draft", () => {
+    expect(kindsFromText("VAT Return Aug 2026.pdf")).toEqual(["return"]);
+    expect(kindsFromText("65_2026-08_2632_VAT-RTN.pdf")).toEqual(["return"]);
+    expect(kindsFromText("Return acknowledgement Aug 2026.pdf")).toEqual(["return", "acknowledgement"]);
+    expect(kindsFromText("ACK_2632.pdf")).toEqual(["acknowledgement"]);
+    expect(kindsFromText("58_2026-01_2611_VAT-RTN+ACK_SCANNED.pdf")).toEqual(["return", "acknowledgement"]);
+    expect(kindsFromText("VAT-RTN + VAT-ACK (one scan)")).toEqual(["return", "acknowledgement"]);
+    expect(kindsFromText("58_2026-01_2611_VAT-DRAFT.pdf")).toEqual([]);
+    expect(kindsFromText("scan001.pdf")).toEqual([]);
+    expect(kindFromText("Return acknowledgement Aug 2026.pdf")).toBe("acknowledgement");
+  });
+  it("prefers the index over the file name, matches original names too, and reports files not selected", () => {
+    const index = [
+      { file: "scan001.pdf", alt: "VAT RETURN - AUG 2026.pdf", period: "2026-08", kinds: ["return" as const] },
+      { file: "scan002", period: "2026-08", kinds: ["acknowledgement" as const] },
+      { file: "both.pdf", period: "2026-01", kinds: ["return" as const, "acknowledgement" as const] },
+      { file: "missing.pdf", period: "2026-07", kinds: ["return" as const] },
+    ];
+    const files = ["VAT RETURN - AUG 2026.pdf", "SCAN002.PDF", "both.pdf", "Ack 2026-07.pdf"];
+    expect(matchDocuments(files, index)).toEqual([
+      { name: "VAT RETURN - AUG 2026.pdf", period: "2026-08", kind: "return", source: "index" },
+      { name: "SCAN002.PDF", period: "2026-08", kind: "acknowledgement", source: "index" },
+      { name: "both.pdf", period: "2026-01", kind: "return", source: "index" },
+      { name: "both.pdf", period: "2026-01", kind: "acknowledgement", source: "index" },
+      { name: "Ack 2026-07.pdf", period: "2026-07", kind: "acknowledgement", source: "name" },
+    ]);
+    expect(missingFiles(files, index)).toEqual(["missing.pdf"]);
+  });
+  it("parses an index sheet with file, period and type columns", () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["Index of VAT returns"],
+        ["File name", "Period", "Type"],
+        ["R_2632.pdf", "2632", "Return"],
+        ["A_2632.pdf", "Aug 2026", "Acknowledgement"],
+        ["R_2631.pdf", 46204, "Return"],
+        ["", "", ""],
+      ]),
+      "Index",
+    );
+    const rows = parseDocumentIndex(XLSX.write(wb, { type: "array", bookType: "xlsx" }));
+    expect(rows).toEqual([
+      { file: "R_2632.pdf", period: "2026-08", kinds: ["return"] },
+      { file: "A_2632.pdf", period: "2026-08", kinds: ["acknowledgement"] },
+      { file: "R_2631.pdf", period: "2026-07", kinds: ["return"] },
+    ]);
+  });
+
+  const folder = path.join(root, "Standard Named");
+  it.skipIf(!existsSync(folder))("matches every file in the Standard Named folder: 65 returns, 30 acknowledgements, 2 drafts skipped", () => {
+    const names = readdirSync(folder);
+    const indexName = names.find((n) => /index/i.test(n) && /.(csv|xlsx)$/i.test(n))!;
+    const index = parseDocumentIndex(read(path.join("Standard Named", indexName)));
+    expect(index.length).toBeGreaterThanOrEqual(95);
+    const pdfs = names.filter((n) => /.pdf$/i.test(n));
+    expect(pdfs).toHaveLength(96);
+    const m = matchDocuments(pdfs, index);
+    const returns = m.filter((x) => x.kind === "return");
+    const acks = m.filter((x) => x.kind === "acknowledgement");
+    const none = m.filter((x) => !x.kind);
+    expect(returns).toHaveLength(65);
+    expect(acks).toHaveLength(30);
+    expect(none.map((x) => x.name)).toEqual(["58_2026-01_2611_VAT-DRAFT.pdf", "60_2026-03_2613_VAT-DRAFT.pdf"]);
+    expect(m.every((x) => x.period)).toBe(true);
+    expect(m.every((x) => x.source === "index")).toBe(true);
+    // one return per period, no two files claiming the same slot
+    expect(new Set(returns.map((x) => x.period)).size).toBe(65);
+    expect(new Set(acks.map((x) => x.period)).size).toBe(30);
+    expect(returns.find((x) => x.name === "01_2020-01_2011_VAT-RTN_SCANNED.pdf")?.period).toBe("2020-01");
+    expect(missingFiles(pdfs, index)).toEqual([]);
   });
 });

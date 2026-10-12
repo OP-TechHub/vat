@@ -6,6 +6,7 @@
 import * as XLSX from "xlsx";
 import { MN, mLabel, fmt, sum, cents } from "./format";
 import { CAGES, type CageField, type ExportUploadRow, type LedgerUploadRow, type ReturnPeriodRow, type ScheduleUploadRow } from "./types";
+import { kindsFromText, periodFromText, type IndexRow } from "./matchDocuments";
 
 export type UploadKind = "ledger" | "schedule" | "export";
 
@@ -423,6 +424,43 @@ export function parseReturnWorkbook(buf: ArrayBuffer | Uint8Array): ParsedReturn
       `Sheet “${name}”: ${periods.length} periods from ${first} to ${last}, ${submitted} with a submission date. ` +
       "Saving replaces the cage figures and submission date of these periods; ledger figures already entered are kept.",
   };
+}
+
+/**
+ * Parse an index of return / acknowledgement files: a sheet with a file-name column and, where
+ * present, a period column (period code, month text or date) and a document-type column.
+ * Headings are matched by text. Rows without a file name are ignored.
+ */
+export function parseDocumentIndex(buf: ArrayBuffer | Uint8Array): IndexRow[] {
+  const wb = XLSX.read(buf, { type: "array", cellDates: false, raw: true });
+  const name = wb.SheetNames[0];
+  if (!name) throw new UploadError("The index file has no worksheets.");
+  const A = XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[name], { header: 1, raw: true, defval: "" });
+  const { hi, col } = findHeader(A, /file|document|name/i, "File name", name);
+  const c = {
+    // "New file name" is the name in the folder; "Current / original file name" is kept as an alias.
+    file: col(/new file/, /file ?name/, /^file/, /document ?name/, /^name/, /file/, /document/),
+    alt: col(/current file/, /original file/, /old file/),
+    period: col(/taxable period/, /period/, /month/, /return ?date/, /date/),
+    kind: col(/^document$/, /type/, /kind/, /category/, /document/),
+  };
+  if (c.file < 0) throw new UploadError(`Could not find a file-name column in sheet “${name}”.`);
+  if (c.alt === c.file) c.alt = -1;
+  const rows: IndexRow[] = [];
+  for (const r of A.slice(hi + 1)) {
+    const file = str(r[c.file]);
+    if (!file) continue;
+    let period: string | null = null;
+    if (c.period >= 0) {
+      const v = r[c.period];
+      if (typeof v === "number" && v > 40000 && v < 60000) period = xlDate(v).slice(0, 7);
+      else period = periodFromText(str(v));
+    }
+    const kinds = c.kind >= 0 && c.kind !== c.file ? kindsFromText(str(r[c.kind])) : [];
+    const alt = c.alt >= 0 ? str(r[c.alt]) : "";
+    rows.push({ file, ...(alt ? { alt } : {}), period, kinds });
+  }
+  return rows;
 }
 
 function noRows(month: string, sheet: string, skipped: number) {
