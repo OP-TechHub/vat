@@ -44,7 +44,13 @@ export default function FilingView() {
       setFiling(await loadFiling(supabase, company.id));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load the filing register.");
+      const msg = e instanceof Error ? e.message : "Could not load the filing register.";
+      setError(
+        /schema cache|does not exist/i.test(msg)
+          ? `${msg}. Run supabase/migrations/0005_return_filing.sql in the Supabase SQL Editor (see README step 2).`
+          : msg,
+      );
+      setFiling({ returns: [], documents: [] });
     }
   }, [supabase, company]);
 

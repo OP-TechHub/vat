@@ -70,6 +70,10 @@ const LS_YEAR = "vat.year";
 
 const currentTaxYear = () => taxYearOf(new Date().toISOString().slice(0, 10));
 
+/** PostgREST's error when a table, view or column from an unapplied migration is queried. */
+const isMissingTable = (e: unknown) =>
+  e instanceof Error && /schema cache|does not exist|relation .* not found/i.test(e.message);
+
 const TABS: { href: string; label: string; admin?: boolean }[] = [
   { href: "/summary", label: "Summary" },
   { href: "/invoices", label: "Invoice listing" },
@@ -145,16 +149,31 @@ export default function AppShell({
     setLoading(true);
     setError(null);
     try {
+      // Tables added by later migrations must not take the whole app down when a project has not
+      // run them yet: load them separately and fall back to an empty list with a notice.
+      const missing: string[] = [];
+      const optional = <T,>(p: Promise<T[]>, name: string) =>
+        p.catch((e: unknown) => {
+          if (isMissingTable(e)) {
+            missing.push(name);
+            return [] as T[];
+          }
+          throw e;
+        });
       const [invoices, schedule, returns, exports, r] = await Promise.all([
         loadInvoices(supabase, companyId, year),
         loadScheduleLines(supabase, companyId, year),
         loadReturns(supabase, companyId, year),
-        loadExportSales(supabase, companyId, year),
+        optional(loadExportSales(supabase, companyId, year), "0004_export_sales.sql"),
         loadRole(supabase, companyId, user.id),
       ]);
       if (id !== reqId.current) return;
       setData({ invoices, schedule, returns, exports });
       setRole(r);
+      if (missing.length)
+        setError(
+          `This Supabase project is missing newer database objects. Run ${missing.join(", ")} from supabase/migrations in the SQL Editor (see README step 2). Until then the affected tab shows no data.`,
+        );
     } catch (e) {
       if (id !== reqId.current) return;
       setError(e instanceof Error ? e.message : "Could not load records.");
