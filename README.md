@@ -14,6 +14,7 @@ Stack: Next.js (App Router, TypeScript), Tailwind CSS, Supabase (Postgres, Auth,
 | `supabase/migrations/0004_export_sales.sql` | `export_sales` table and upload function for the Export reconciliation tab |
 | `supabase/migrations/0005_return_filing.sql` | Submission date, `return_documents` table and the `vat-claims` storage bucket for the Return filing tab |
 | `supabase/migrations/0006_return_cages.sql` | All entered cages of the return on `vat_returns`, as in the VAT Return_Upload workbook |
+| `supabase/migrations/0007_ird_status.sql` | `ird_status` table (credit voucher status, date, value) and the credit voucher document kind |
 | `lib/reports.ts`, `lib/export.ts` | Summary and reconciliation calculations, Excel export |
 | `supabase/seed.sql` | Oceanpick 2026/27 data (608 invoices, 244 schedule lines, April return) |
 | `templates/` | Blank upload templates (also downloadable from the app) |
@@ -45,9 +46,10 @@ In the dashboard open **SQL Editor → New query**, then:
 4. Paste the whole of `supabase/migrations/0004_export_sales.sql` and click **Run**. It adds the `export_sales` table and upload function behind the Export reconciliation tab. Run it on existing projects too.
 5. Paste the whole of `supabase/migrations/0005_return_filing.sql` and click **Run**. It adds the submission date to returns, the `return_documents` table and the private `vat-claims` storage bucket with its policies, for the Return filing tab. Run it on existing projects too.
 6. Paste the whole of `supabase/migrations/0006_return_cages.sql` and click **Run**. It adds the remaining entered cages of the return (A, 0, B/2, C/2A, 3, D1, E1, J, K, J2, 8A, 11, 12, 15, 16, Q, R2, 17, 18) to `vat_returns`. Run it on existing projects too.
-7. Paste the whole of `supabase/seed.sql` and click **Run**.
-8. Optional: paste the whole of `supabase/seed_returns.sql` and click **Run**. It loads the 65 VAT return periods from Jan 2020 to Aug 2026 (every entered cage and the submission date) for the seeded company. The same data can instead be uploaded from the VAT reconciliation tab. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
-8. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
+7. Paste the whole of `supabase/migrations/0007_ird_status.sql` and click **Run**. It adds the `ird_status` table for the IRD status tab and lets the document table hold credit vouchers. Run it on existing projects too.
+8. Paste the whole of `supabase/seed.sql` and click **Run**.
+9. Optional: paste the whole of `supabase/seed_returns.sql` and click **Run**. It loads the 65 VAT return periods from Jan 2020 to Aug 2026 (every entered cage and the submission date) for the seeded company. The same data can instead be uploaded from the VAT reconciliation tab. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
+10. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
 
 Or, with the Supabase CLI installed and logged in:
 

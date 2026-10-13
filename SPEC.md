@@ -17,7 +17,8 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 | `invoice_claim_status` (view) | Ledger invoices with derived `claim_status`, `claim_month`, `auto_claim_month` |
 | `schedule_line_match` (view) | Schedule lines with the matching ledger invoice number, if any |
 | `export_sales` | Export sales report lines with customs details, per sales-report month (migration 0004) |
-| `return_documents` | Filed return and IRD acknowledgement documents per period, stored in the `vat-claims` bucket (migration 0005) |
+| `return_documents` | Filed return, IRD acknowledgement and credit voucher documents per period, stored in the `vat-claims` bucket (migrations 0005, 0007) |
+| `ird_status` | Credit voucher status, date and value per period (migration 0007) |
 | `replace_ledger_month`, `replace_schedule_month`, `replace_export_month` (RPC) | Atomic replace of one month on upload |
 
 `supabase/seed.sql` loads Oceanpick's 2026/27 data: 608 ledger invoices (Apr–Aug 2026), 244 schedule lines, the April return.
@@ -57,6 +58,9 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
    - Columns: Period code (IRD YYQM, e.g. Aug 2026 = 2632), Taxable period, Submitted on (per IRD acknowledgement), Data uploaded (Yes/No), Return uploaded (Yes/No), Acknowledgement uploaded (Yes/No). Filter: all periods, or only those with something missing.
    - Data uploaded is Yes when a `vat_returns` row exists for the period (loaded from the workbook or entered on the VAT reconciliation tab).
    - Return uploaded / Acknowledgement uploaded are Yes when a document is held for the period in the private `vat-claims` storage bucket (table `return_documents`). Members can open a document through a signed link; editors upload, replace and remove. Storage policies mirror the company roles.
+5b. **IRD status** (every taxable period from Jan 2020, newest first, same range and show filters as Return filing)
+   - Columns: Period code, Taxable period, Deferred import VAT (cage 4 of the period's return), Refund due (cage 15), Status, Date of credit voucher, Value of credit voucher, Credit voucher attachment. Totals row for the amounts.
+   - Status is one of Credit voucher received, Credit voucher pending, Information under submission, or not set; held in `ird_status` with the voucher date and value. Date, value and attachment are editable once the status is received. The voucher is a `return_documents` row of kind `credit_voucher` in the `vat-claims` bucket, with Open / Attach / Replace / Remove.
 6. **Export to Excel**: Invoice Listing (with status and claim month), IRD Submitted Input, VAT Returns.
 7. **Members** (admin only): invite by email, set role, remove.
 

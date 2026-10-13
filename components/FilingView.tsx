@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import Link from "next/link";
 import { useApp } from "./AppShell";
 import BulkDocumentUpload from "./BulkDocumentUpload";
+import { DocActions, DocHeading } from "./DocActions";
 import { mLabel, monthKey, monthsBetween, periodCode } from "@/lib/format";
 import { loadFiling, type FilingData } from "@/lib/data";
 import { DOC_ACCEPT, DOC_LABEL, documentUrl, isMissingTable, removeDocument, uploadDocument } from "@/lib/documents";
@@ -140,30 +141,17 @@ export default function FilingView() {
   );
 
   const DocCell = ({ r, kind }: { r: PeriodRow; kind: DocumentKind }) => {
-    const doc = r.docs[kind];
     const isBusy = busy === r.month + ":" + kind;
     return (
       <td className={isBusy ? "opacity-60" : undefined}>
-        <div className="flex flex-wrap items-center gap-2">
-          <YesNo yes={!!doc} />
-          {doc && (
-            <button className="btn" type="button" onClick={() => void openDocument(doc)} title={doc.filename}>
-              Open
-            </button>
-          )}
-          {canWrite && (
-            <>
-              <button className="btn" type="button" disabled={isBusy} onClick={() => pickDocument(r.month, kind)}>
-                {doc ? "Replace" : "Upload"}
-              </button>
-              {doc && (
-                <button className="btn btn-danger" type="button" disabled={isBusy} onClick={() => void remove(r.month, doc)}>
-                  Remove
-                </button>
-              )}
-            </>
-          )}
-        </div>
+        <DocActions
+          doc={r.docs[kind]}
+          canWrite={canWrite}
+          busy={isBusy}
+          onOpen={(d) => void openDocument(d)}
+          onPick={() => pickDocument(r.month, kind)}
+          onRemove={(d) => void remove(r.month, d)}
+        />
       </td>
     );
   };
@@ -237,8 +225,8 @@ export default function FilingView() {
               <th>Taxable period</th>
               <th>Submitted on</th>
               <th>Data uploaded</th>
-              <th>Return uploaded</th>
-              <th>Acknowledgement uploaded</th>
+              <DocHeading title="Return uploaded" canWrite={canWrite} />
+              <DocHeading title="Acknowledgement uploaded" canWrite={canWrite} />
             </tr>
           </thead>
           <tbody>

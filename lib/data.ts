@@ -1,5 +1,5 @@
 import type { Db } from "./supabase/schema";
-import type { Company, ExportSale, Invoice, ReturnDocument, Role, ScheduleLine, VatReturn } from "./types";
+import type { Company, ExportSale, Invoice, IrdStatus, ReturnDocument, Role, ScheduleLine, VatReturn } from "./types";
 import { yearRange } from "./format";
 
 const PAGE = 1000;
@@ -144,6 +144,38 @@ export async function loadFiling(sb: Db, companyId: string): Promise<FilingData>
     ),
   ]);
   return { returns, documents };
+}
+
+export interface IrdStatusData {
+  /** Every return held for the company: month, deferred import VAT (4) and gross refund due (15). */
+  returns: Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund">[];
+  statuses: IrdStatus[];
+  vouchers: ReturnDocument[];
+}
+
+/** IRD status inputs for every period, not limited to the selected tax year. */
+export async function loadIrdStatus(sb: Db, companyId: string): Promise<IrdStatusData> {
+  const [returns, statuses, vouchers] = await Promise.all([
+    fetchAll<Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund">>((a, b) =>
+      sb
+        .from("vat_returns")
+        .select("return_month,imports_deferred,gross_refund")
+        .eq("company_id", companyId)
+        .order("return_month")
+        .range(a, b),
+    ),
+    fetchAll<IrdStatus>((a, b) => sb.from("ird_status").select("*").eq("company_id", companyId).order("return_month").range(a, b)),
+    fetchAll<ReturnDocument>((a, b) =>
+      sb
+        .from("return_documents")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("kind", "credit_voucher")
+        .order("return_month")
+        .range(a, b),
+    ),
+  ]);
+  return { returns, statuses, vouchers };
 }
 
 /** Re-read one schedule line from the view after an inline edit so derived fields are fresh. */

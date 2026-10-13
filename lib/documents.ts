@@ -7,8 +7,13 @@ import type { Db } from "./supabase/schema";
 import type { DocumentKind, ReturnDocument } from "./types";
 
 export const BUCKET = "vat-claims";
+/** Kinds handled by the return / acknowledgement screens; the credit voucher lives on the IRD status tab. */
 export const DOC_KINDS: DocumentKind[] = ["return", "acknowledgement"];
-export const DOC_LABEL: Record<DocumentKind, string> = { return: "VAT return", acknowledgement: "Return acknowledgement" };
+export const DOC_LABEL: Record<DocumentKind, string> = {
+  return: "VAT return",
+  acknowledgement: "Return acknowledgement",
+  credit_voucher: "Credit voucher",
+};
 export const DOC_ACCEPT = ".pdf,.jpg,.jpeg,.png";
 
 /** Documents of one period ("YYYY-MM"). */

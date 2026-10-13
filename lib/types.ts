@@ -134,7 +134,25 @@ export interface VatReturn {
   updated_by?: string | null;
 }
 
-export type DocumentKind = "return" | "acknowledgement";
+export type DocumentKind = "return" | "acknowledgement" | "credit_voucher";
+
+export type IrdStatusValue = "received" | "pending" | "submission";
+export const IRD_STATUS_LABEL: Record<IrdStatusValue, string> = {
+  received: "Credit voucher received",
+  pending: "Credit voucher pending",
+  submission: "Information under submission",
+};
+
+/** Row of ird_status: credit voucher position of one taxable period. */
+export interface IrdStatus {
+  company_id: string;
+  return_month: string; // YYYY-MM-DD
+  status: IrdStatusValue | null;
+  voucher_date: string | null; // YYYY-MM-DD
+  voucher_value: number | null;
+  updated_at?: string;
+  updated_by?: string | null;
+}
 
 /** Row of return_documents: a filed return or IRD acknowledgement held in storage for a period. */
 export interface ReturnDocument {
