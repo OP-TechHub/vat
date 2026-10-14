@@ -147,8 +147,8 @@ export async function loadFiling(sb: Db, companyId: string): Promise<FilingData>
 }
 
 export interface IrdStatusData {
-  /** Every return held for the company: month, deferred import VAT (4) and gross refund due (15). */
-  returns: Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund">[];
+  /** Every return held for the company: month, deferred import VAT (4), gross refund due (15) and net (18). */
+  returns: Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund" | "net_refund_payable">[];
   statuses: IrdStatus[];
   vouchers: ReturnDocument[];
 }
@@ -156,10 +156,10 @@ export interface IrdStatusData {
 /** IRD status inputs for every period, not limited to the selected tax year. */
 export async function loadIrdStatus(sb: Db, companyId: string): Promise<IrdStatusData> {
   const [returns, statuses, vouchers] = await Promise.all([
-    fetchAll<Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund">>((a, b) =>
+    fetchAll<Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund" | "net_refund_payable">>((a, b) =>
       sb
         .from("vat_returns")
-        .select("return_month,imports_deferred,gross_refund")
+        .select("return_month,imports_deferred,gross_refund,net_refund_payable")
         .eq("company_id", companyId)
         .order("return_month")
         .range(a, b),
