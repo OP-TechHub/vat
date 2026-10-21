@@ -146,9 +146,23 @@ export async function loadFiling(sb: Db, companyId: string): Promise<FilingData>
   return { returns, documents };
 }
 
+/** Cages of a return shown on the IRD status tab: 4, 5, 6, 8, 8A, 15, Q and 18. */
+export type IrdStatusReturn = Pick<
+  VatReturn,
+  | "return_month"
+  | "imports_deferred"
+  | "imports_upfront"
+  | "local_tax"
+  | "disallowed"
+  | "disallowed_suspended"
+  | "gross_refund"
+  | "monthly_payments"
+  | "net_refund_payable"
+>;
+
 export interface IrdStatusData {
-  /** Every return held for the company: month, deferred import VAT (4), gross refund due (15) and net (18). */
-  returns: Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund" | "net_refund_payable">[];
+  /** Every return held for the company, limited to the cages the IRD status tab shows. */
+  returns: IrdStatusReturn[];
   statuses: IrdStatus[];
   vouchers: ReturnDocument[];
 }
@@ -156,10 +170,10 @@ export interface IrdStatusData {
 /** IRD status inputs for every period, not limited to the selected tax year. */
 export async function loadIrdStatus(sb: Db, companyId: string): Promise<IrdStatusData> {
   const [returns, statuses, vouchers] = await Promise.all([
-    fetchAll<Pick<VatReturn, "return_month" | "imports_deferred" | "gross_refund" | "net_refund_payable">>((a, b) =>
+    fetchAll<IrdStatusReturn>((a, b) =>
       sb
         .from("vat_returns")
-        .select("return_month,imports_deferred,gross_refund,net_refund_payable")
+        .select("return_month,imports_deferred,imports_upfront,local_tax,disallowed,disallowed_suspended,gross_refund,monthly_payments,net_refund_payable")
         .eq("company_id", companyId)
         .order("return_month")
         .range(a, b),

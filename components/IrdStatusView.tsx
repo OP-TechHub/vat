@@ -19,6 +19,7 @@ interface PeriodRow {
   deferred: number | null; // cage 4
   refund: number | null; // cage 15
   netRefund: number | null; // refund due less credits and tax payable, i.e. -(cage 18)
+  inputLessPaid: number | null; // 5 + 6 - 8 - 8A - Q
   status: IrdStatusValue | null;
   voucherDate: string | null;
   voucherValue: number | null;
@@ -66,7 +67,7 @@ export default function IrdStatusView() {
     const latest = [today, ...data.returns.map((r) => monthKey(r.return_month))].sort().pop()!;
     const by: Record<string, PeriodRow> = {};
     for (const k of monthsBetween(FIRST_PERIOD, latest))
-      by[k] = { month: k, hasData: false, deferred: null, refund: null, netRefund: null, status: null, voucherDate: null, voucherValue: null, voucher: null };
+      by[k] = { month: k, hasData: false, deferred: null, refund: null, netRefund: null, inputLessPaid: null, status: null, voucherDate: null, voucherValue: null, voucher: null };
     for (const r of data.returns) {
       const row = by[monthKey(r.return_month)];
       if (!row) continue;
@@ -74,6 +75,8 @@ export default function IrdStatusView() {
       row.deferred = +(r.imports_deferred ?? 0) || 0;
       row.refund = +(r.gross_refund ?? 0) || 0;
       row.netRefund = -(+(r.net_refund_payable ?? 0) || 0);
+      const n = (v: number | null | undefined) => +(v ?? 0) || 0;
+      row.inputLessPaid = n(r.imports_upfront) + n(r.local_tax) - n(r.disallowed) - n(r.disallowed_suspended) - n(r.monthly_payments);
     }
     for (const s of data.statuses) {
       const row = by[monthKey(s.return_month)];
@@ -258,6 +261,7 @@ export default function IrdStatusView() {
               <th className="num">Deferred import VAT (4)</th>
               <th className="num">Refund due (15)</th>
               <th className="num">Net refund (18)</th>
+              <th className="num">Input tax less tax paid (5+6−8−8A−Q)</th>
               <th>Status</th>
               <th>Date of credit voucher</th>
               <th className="num">Value of credit voucher</th>
@@ -267,13 +271,13 @@ export default function IrdStatusView() {
           <tbody>
             {!data ? (
               <tr>
-                <td colSpan={9} className="note">
+                <td colSpan={10} className="note">
                   Loading records…
                 </td>
               </tr>
             ) : !shown.length ? (
               <tr>
-                <td colSpan={9} className="note">
+                <td colSpan={10} className="note">
                   No periods match.
                 </td>
               </tr>
@@ -289,6 +293,9 @@ export default function IrdStatusView() {
                       <td className={"num" + (r.hasData ? "" : " text-muted")}>{r.hasData ? fmt(r.deferred) : "no return data"}</td>
                       <td className="num">{r.hasData ? fmt(r.refund) : ""}</td>
                       <td className={"num" + (r.netRefund != null && r.netRefund < 0 ? " diffx" : "")}>{r.hasData ? fmt(r.netRefund) : ""}</td>
+                      <td className={"num" + (r.inputLessPaid != null && r.inputLessPaid < 0 ? " diffx" : "")}>
+                        {r.hasData ? fmt(r.inputLessPaid) : ""}
+                      </td>
                       <td>
                         {canWrite ? (
                           <select
@@ -357,6 +364,7 @@ export default function IrdStatusView() {
                   <td className="num">{fmt(sum(withData, (r) => r.deferred ?? 0))}</td>
                   <td className="num">{fmt(sum(withData, (r) => r.refund ?? 0))}</td>
                   <td className="num">{fmt(sum(withData, (r) => r.netRefund ?? 0))}</td>
+                  <td className="num">{fmt(sum(withData, (r) => r.inputLessPaid ?? 0))}</td>
                   <td colSpan={2}></td>
                   <td className="num">{fmt(sum(shown, (r) => r.voucherValue ?? 0))}</td>
                   <td></td>
@@ -369,7 +377,9 @@ export default function IrdStatusView() {
       <div className="note">
         Deferred import VAT is cage 4, refund due is cage 15 and net refund is cage 18 (refund due less credits and tax
         payable, shown positive when a refund is due and highlighted when tax is payable) of the period’s return, as held on the VAT
-        reconciliation tab. Status, voucher date and value are entered here; the date, value and attachment open
+        reconciliation tab. Input tax less tax paid is upfront import tax (5) plus tax on local purchases (6), less disallowed
+        input tax on imports and other purchases (8) and on suspended purchases (8A), less monthly payments (Q), highlighted when
+        negative. Status, voucher date and value are entered here; the date, value and attachment open
         once the status is “Credit voucher received”. Vouchers are kept with the returns in the vat-claims bucket.
       </div>
     </>
