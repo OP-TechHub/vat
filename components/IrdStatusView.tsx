@@ -19,7 +19,7 @@ interface PeriodRow {
   deferred: number | null; // cage 4
   refund: number | null; // cage 15
   netRefund: number | null; // refund due less credits and tax payable, i.e. -(cage 18)
-  inputLessPaid: number | null; // 5 + 6 - 8 - 8A - Q
+  inputLessPaid: number | null; // 5 + 6 - 8 - 8A + Q
   status: IrdStatusValue | null;
   voucherDate: string | null;
   voucherValue: number | null;
@@ -76,7 +76,7 @@ export default function IrdStatusView() {
       row.refund = +(r.gross_refund ?? 0) || 0;
       row.netRefund = -(+(r.net_refund_payable ?? 0) || 0);
       const n = (v: number | null | undefined) => +(v ?? 0) || 0;
-      row.inputLessPaid = n(r.imports_upfront) + n(r.local_tax) - n(r.disallowed) - n(r.disallowed_suspended) - n(r.monthly_payments);
+      row.inputLessPaid = n(r.imports_upfront) + n(r.local_tax) - n(r.disallowed) - n(r.disallowed_suspended) + n(r.monthly_payments);
     }
     for (const s of data.statuses) {
       const row = by[monthKey(s.return_month)];
@@ -261,7 +261,7 @@ export default function IrdStatusView() {
               <th className="num">Deferred import VAT (4)</th>
               <th className="num">Refund due (15)</th>
               <th className="num">Net refund (18)</th>
-              <th className="num">Input tax less tax paid (5+6−8−8A−Q)</th>
+              <th className="num">Input tax less tax paid (5+6−8−8A+Q)</th>
               <th>Status</th>
               <th>Date of credit voucher</th>
               <th className="num">Value of credit voucher</th>
@@ -378,7 +378,7 @@ export default function IrdStatusView() {
         Deferred import VAT is cage 4, refund due is cage 15 and net refund is cage 18 (refund due less credits and tax
         payable, shown positive when a refund is due and highlighted when tax is payable) of the period’s return, as held on the VAT
         reconciliation tab. Input tax less tax paid is upfront import tax (5) plus tax on local purchases (6), less disallowed
-        input tax on imports and other purchases (8) and on suspended purchases (8A), less monthly payments (Q), highlighted when
+        input tax on imports and other purchases (8) and on suspended purchases (8A), plus monthly payments (Q), highlighted when
         negative. Status, voucher date and value are entered here; the date, value and attachment open
         once the status is “Credit voucher received”. Vouchers are kept with the returns in the vat-claims bucket.
       </div>
