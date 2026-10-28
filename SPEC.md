@@ -18,6 +18,8 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 | `schedule_line_match` (view) | Schedule lines with the matching ledger invoice number, if any |
 | `export_sales` | Export sales report lines with customs details, per sales-report month (migration 0004) |
 | `return_documents` | Filed return, IRD acknowledgement and credit voucher documents per period, stored in the `vat-claims` bucket (migrations 0005, 0007) |
+| `import_purchases`, `customs_entries` | Import reconciliation rows and customs declaration lines for both directions (migration 0008) |
+| `replace_customs_entries`, `apply_customs`, `replace_import_month` (RPC) | Store customs entries and fill the matching reconciliation rows; replace a month of import purchases |
 | `ird_status` | Credit voucher status, date and value per period (migration 0007) |
 | `replace_ledger_month`, `replace_schedule_month`, `replace_export_month` (RPC) | Atomic replace of one month on upload |
 
@@ -50,6 +52,8 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
    - Editors fill in or correct the customs and difference columns inline. Custom Value is recalculated as invoice value × customs rate whenever either changes.
    - View from / to month selectors show any range within the tax year, with a subtotal row per month (amount FC, net sales, customs value, exchange difference, short shipment, sales reversed) and a grand total when more than one month is shown.
    - Included in the Excel export as the "Export Reconciliation" sheet.
+   - Upload export customs entries (editors): CusDec lines stored in `customs_entries` (direction export, keyed by CusDec and invoice number). On save, and again whenever a month's sales report is uploaded, the "As per customs" columns of the sales row with the same invoice number (compared like document numbers) are filled from the latest entry: CusDec no, date, month, currency, customs rate, invoice value, customs value.
+4b. **Import reconciliation** (table `import_purchases`, migration 0008): the same screen for import purchases. Details in purchase ledger: Invoice No, Month, Amount FC (CIF), Ex.rate, Ledger Value (A). As per customs adds VAT as per customs. Upload a month's import purchase report and import customs entries (with VAT Amount) the same way; customs entries fill the matching purchase rows. Included in the Excel export as "Import Reconciliation".
 5. **VAT reconciliation**
    - "Upload VAT return data" panel (editors): the VAT Return_Upload workbook, every period in the file upserted into `vat_returns` (see Upload formats).
    - Left panel, per month: submission date; the VAT return and return acknowledgement documents (Uploaded / Not uploaded, Open, Upload / Replace / Remove); then every entered cage of the return in return order (A, 0, B/2, C/2A, 3, D, D1, E, E1; H, 4, 5, I, 6, J, K, J2, 8, 8A, 10; 11, 12, 15, 16, Q, R2, 17, 18) and the three ledger figures. Inputs show thousands separators.

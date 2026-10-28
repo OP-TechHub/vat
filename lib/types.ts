@@ -178,7 +178,13 @@ export type ReturnField = Exclude<
 
 export type CurrencyType = "USD" | "EUR";
 
-/** Row of the export_sales table: one export invoice per sales-report month. */
+/** Export sales or import purchases: the two reconciliation tables share one shape. */
+export type ReconDirection = "export" | "import";
+
+/**
+ * Row of export_sales or import_purchases: one invoice per report month (sales_month is the
+ * purchase-ledger month for imports). custom_vat_amount exists on import_purchases only.
+ */
 export interface ExportSale {
   id: string;
   company_id: string;
@@ -194,6 +200,7 @@ export interface ExportSale {
   custom_ex_rate: number | null;
   custom_invoice_value: number | null;
   custom_value: number | null;
+  custom_vat_amount?: number | null;
   short_shipment: number | null;
   sales_reversed: number | null;
   updated_in_custom_report: string | null;
@@ -203,7 +210,7 @@ export interface ExportSale {
   updated_by: string | null;
 }
 
-/** Fields of an export sale that editors may change inline. */
+/** Fields of an export sale / import purchase that editors may change inline. */
 export type ExportEditable = Pick<
   ExportSale,
   | "cusdec_no"
@@ -213,10 +220,26 @@ export type ExportEditable = Pick<
   | "custom_ex_rate"
   | "custom_invoice_value"
   | "custom_value"
+  | "custom_vat_amount"
   | "short_shipment"
   | "sales_reversed"
   | "updated_in_custom_report"
 >;
+
+/** Parsed customs entry (CusDec line) ready for replace_customs_entries. Null = not in the file. */
+export interface CustomsUploadRow {
+  cusdec_no: string;
+  cusdec_date: string;
+  cusdec_month: string | null;
+  invoice_no: string;
+  currency_type: string;
+  ex_rate: number | null;
+  invoice_value: number | null;
+  customs_value: number | null;
+  vat_amount: number | null;
+  party: string;
+  description: string;
+}
 
 /** Parsed export-reconciliation row ready for replace_export_month. Null = not given in the file. */
 export interface ExportUploadRow {
@@ -231,6 +254,7 @@ export interface ExportUploadRow {
   custom_ex_rate: number | null;
   custom_invoice_value: number | null;
   custom_value: number | null;
+  custom_vat_amount?: number | null;
   short_shipment: number | null;
   sales_reversed: number | null;
   updated_in_custom_report: string;

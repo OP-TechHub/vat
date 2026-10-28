@@ -21,6 +21,7 @@ const PARSER: Record<UploadKind, (buf: ArrayBuffer, month: string, existing: num
   ledger: parseLedger,
   schedule: parseSchedule,
   export: parseExport,
+  import: (buf, month, existing) => parseExport(buf, month, existing, "import"),
 };
 
 const COPY: Record<UploadKind, { title: string; note: string; rpc: string }> = {
@@ -41,6 +42,12 @@ const COPY: Record<UploadKind, { title: string; note: string; rpc: string }> = {
     note:
       "Excel or CSV with columns Invoice No, Month, Amount FC (FOB) USD / EUR, Ex.rate, Net Sales (A). The customs columns (Cusdec No, Date, Month, Currency Type, Ex. Rate Custom LKR, Invoice Value as Per USD / EUR, Custom Value) and Short Shipment, Sales Reversed and Updated in Custom Report may be included or filled in on the table afterwards. If the file has a Month column, only the chosen month’s rows are taken. Customs details already entered are kept where the file leaves them blank.",
     rpc: "replace_export_month",
+  },
+  import: {
+    title: "Upload a month’s import purchase report",
+    note:
+      "Excel or CSV with columns Invoice No, Month, Amount FC (CIF) USD / EUR, Ex.rate, Ledger Value (A). The customs columns and VAT as per Customs may be included, filled in on the table, or filled automatically from uploaded import customs entries. If the file has a Month column, only the chosen month’s rows are taken. Customs details already entered are kept where the file leaves them blank.",
+    rpc: "replace_import_month",
   },
 };
 

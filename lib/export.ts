@@ -17,6 +17,7 @@ export function exportWorkbook(
   schedule: ScheduleLine[],
   returns: VatReturn[],
   exports: ExportSale[] = [],
+  imports: ExportSale[] = [],
 ): { wb: XLSX.WorkBook; filename: string } {
   const months = monthsOf(year);
   const wb = XLSX.utils.book_new();
@@ -55,28 +56,35 @@ export function exportWorkbook(
       });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sr), "IRD Submitted Input");
 
-  const ex: Record<string, string | number>[] = [];
-  for (const k of months)
-    for (const r of exports.filter((x) => monthKey(x.sales_month) === k))
-      ex.push({
-        "Invoice No": r.invoice_no,
-        Month: mLabel(k),
-        "Amount FC (FOB) USD / EUR": r.amount_fc,
-        "Ex.rate": r.ex_rate ?? "",
-        "Net Sales (A)": r.net_sales,
-        "Cusdec No": r.cusdec_no ?? "",
-        Date: r.cusdec_date ?? "",
-        "Customs Month": r.cusdec_month ?? "",
-        "Currency Type": r.currency_type,
-        "Ex. Rate Custom LKR": r.custom_ex_rate ?? "",
-        "Invoice Value as Per USD / EUR": r.custom_invoice_value ?? "",
-        "Custom Value": r.custom_value ?? "",
-        "Exchange Difference (1)": r.custom_value == null ? "" : cents(r.custom_value - r.net_sales),
-        "Short Shipment (3)": r.short_shipment ?? "",
-        "Sales Reversed in the Month (4)": r.sales_reversed ?? "",
-        "Updated in Custom Report": r.updated_in_custom_report ?? "",
-      });
+  const recon = (rows: ExportSale[], isImport: boolean) => {
+    const out: Record<string, string | number>[] = [];
+    for (const k of months)
+      for (const r of rows.filter((x) => monthKey(x.sales_month) === k))
+        out.push({
+          "Invoice No": r.invoice_no,
+          Month: mLabel(k),
+          [isImport ? "Amount FC (CIF) USD / EUR" : "Amount FC (FOB) USD / EUR"]: r.amount_fc,
+          "Ex.rate": r.ex_rate ?? "",
+          [isImport ? "Ledger Value (A)" : "Net Sales (A)"]: r.net_sales,
+          "Cusdec No": r.cusdec_no ?? "",
+          Date: r.cusdec_date ?? "",
+          "Customs Month": r.cusdec_month ?? "",
+          "Currency Type": r.currency_type,
+          "Ex. Rate Custom LKR": r.custom_ex_rate ?? "",
+          "Invoice Value as Per USD / EUR": r.custom_invoice_value ?? "",
+          "Custom Value": r.custom_value ?? "",
+          ...(isImport ? { "VAT as per Customs": r.custom_vat_amount ?? "" } : {}),
+          "Exchange Difference (1)": r.custom_value == null ? "" : cents(r.custom_value - r.net_sales),
+          "Short Shipment (3)": r.short_shipment ?? "",
+          "Sales Reversed in the Month (4)": r.sales_reversed ?? "",
+          "Updated in Custom Report": r.updated_in_custom_report ?? "",
+        });
+    return out;
+  };
+  const ex = recon(exports, false);
   if (ex.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ex), "Export Reconciliation");
+  const im = recon(imports, true);
+  if (im.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(im), "Import Reconciliation");
 
   const rr = months
     .map((k) => returns.find((r) => rm(r) === k))

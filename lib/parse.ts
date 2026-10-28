@@ -5,10 +5,19 @@
  */
 import * as XLSX from "xlsx";
 import { MN, mLabel, fmt, sum, cents } from "./format";
-import { CAGES, type CageField, type ExportUploadRow, type LedgerUploadRow, type ReturnPeriodRow, type ScheduleUploadRow } from "./types";
+import {
+  CAGES,
+  type CageField,
+  type CustomsUploadRow,
+  type ExportUploadRow,
+  type LedgerUploadRow,
+  type ReconDirection,
+  type ReturnPeriodRow,
+  type ScheduleUploadRow,
+} from "./types";
 import { kindsFromText, periodFromText, type IndexRow } from "./matchDocuments";
 
-export type UploadKind = "ledger" | "schedule" | "export";
+export type UploadKind = "ledger" | "schedule" | "export" | "import";
 
 /**
  * Excel serial number or dd.mm.yyyy / dd/mm/yyyy / yyyy-mm-dd text -> "YYYY-MM-DD".
@@ -75,6 +84,7 @@ const SHEET_NAME: Record<UploadKind, RegExp> = {
   ledger: /invoice listing/i,
   schedule: /input/i,
   export: /export/i,
+  import: /import|purchase/i,
 };
 
 function readSheet(buf: ArrayBuffer | Uint8Array, kind: UploadKind) {
@@ -255,15 +265,16 @@ export function parseExport(
   buf: ArrayBuffer | Uint8Array,
   month: string,
   existing = 0,
+  direction: ReconDirection = "export",
 ): ParsedUpload<ExportUploadRow> {
-  const { name, A } = readSheet(buf, "export");
+  const { name, A } = readSheet(buf, direction);
   const { hi, col } = findHeader(A, /^\s*invoice no/i, "Invoice No", name);
   const c = {
     inv: col(/^invoice no/),
     m: col(/^month$/, /^month/),
-    amt: col(/^amount/, /fob/),
+    amt: col(/^amount/, /fob/, /cif/),
     rate: col(/^ex\.? ?rate$/, /^ex\.? ?rate(?!.*custom)/),
-    net: col(/net sales/),
+    net: col(/net sales/, /net value/, /ledger value/, /value \(a\)/, /\(lcy\)/),
     cusdec: col(/cusdec/),
     date: col(/^date/),
     cmonth: col(/^month/), // first Month column is the sales one; customs Month found below
@@ -274,6 +285,7 @@ export function parseExport(
     short: col(/short ship/),
     rev: col(/sales rev/),
     upd: col(/updated in custom/),
+    cvat: direction === "import" ? col(/vat.*custom/, /custom.*vat/, /deferred/, /vat amount/, /^vat/) : -1,
   };
   // The sheet has two "Month" columns: sales report, then customs. Use the second if present.
   {
@@ -329,20 +341,119 @@ export function parseExport(
       short_shipment: c.short < 0 ? null : numOrNull(r[c.short]),
       sales_reversed: c.rev < 0 ? null : numOrNull(r[c.rev]),
       updated_in_custom_report: c.upd < 0 ? "" : xlText(r[c.upd]),
+      ...(direction === "import" ? { custom_vat_amount: c.cvat < 0 ? null : numOrNull(r[c.cvat]) } : {}),
     });
   }
   if (!rows.length) throw noRows(month, name, skipped);
   const total = cents(sum(rows, (r) => r.net_sales));
   return {
-    kind: "export",
+    kind: direction,
     month,
     sheet: name,
     rows,
     skipped,
     total,
-    text: previewText("export", name, rows.length, month, total, skipped, existing),
+    text: previewText(direction, name, rows.length, month, total, skipped, existing),
   };
 }
+
+/**
+ * Parse customs entries (CusDec lines) for exports or imports. Columns are matched by heading text:
+ * Cusdec No, Date, Invoice No, Currency, Ex. Rate, Invoice Value (FC), Customs Value (LKR), VAT Amount
+ * (imports), Consignee / Supplier, Description. A CusDec needs at least a CusDec number and an invoice
+ * number. Blank Customs Value is taken as invoice value x rate. Rows repeating the same CusDec and
+ * invoice keep the last. The sheet named like "customs" / "cusdec" is used, else the first.
+ */
+export function parseCustoms(
+  buf: ArrayBuffer | Uint8Array,
+  direction: ReconDirection,
+): { sheet: string; rows: CustomsUploadRow[]; skipped: number; text: string } {
+  const wb = XLSX.read(buf, { type: "array", cellDates: false, raw: true });
+  const name = wb.SheetNames.find((n) => /cusdec|customs|entries|declaration/i.test(n)) || wb.SheetNames[0];
+  if (!name) throw new UploadError("The file has no worksheets.");
+  const A = XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[name], { header: 1, raw: true, defval: "" });
+  const { hi, col } = findHeader(A, /cus ?dec|declaration|entry ?no/i, "Cusdec No", name);
+  const c = {
+    cusdec: col(/cus ?dec ?(no|number)/, /declaration ?(no|number)/, /entry ?(no|number)/, /cus ?dec/, /declaration/),
+    date: col(/cus ?dec date/, /declaration date/, /entry date/, /^date/, /date/),
+    inv: col(/invoice ?(no|number)/, /invoice/, /document ?no/),
+    cur: col(/currency/, /^cur$/),
+    rate: col(/ex\.? ?rate/, /exchange/, /rate/),
+    fc: col(/invoice value/, /fob/, /cif/, /fc value/, /value.*(usd|eur|fc)/, /foreign/),
+    lkr: col(/customs? value/, /assessed/, /value \(lkr\)/, /lkr/),
+    vat: col(/vat amount/, /deferred/, /^vat/, /vat/),
+    party: col(/consignee/, /exporter/, /importer/, /supplier/, /party/, /^name/),
+    desc: col(/description/, /goods/),
+    m: col(/^month/),
+  };
+  if (c.cusdec < 0 || c.inv < 0)
+    throw new UploadError(`The file needs Cusdec No and Invoice No columns (sheet “${name}”).`);
+  const by = new Map<string, CustomsUploadRow>();
+  let skipped = 0;
+  for (const r of A.slice(hi + 1)) {
+    const cusdec = xlText(r[c.cusdec]);
+    const inv = xlText(r[c.inv]);
+    if (!cusdec && !inv) continue;
+    if (!cusdec || !inv || /^total/i.test(cusdec)) {
+      skipped++;
+      continue;
+    }
+    const d = c.date < 0 ? "" : xlDate(r[c.date]);
+    const monthFromDate = /^\d{4}-\d{2}-\d{2}$/.test(d) ? mLabel(d.slice(0, 7)) : null;
+    const rate = c.rate < 0 ? null : numOrNull(r[c.rate], 6);
+    const fc = c.fc < 0 ? null : numOrNull(r[c.fc]);
+    const lkr = c.lkr < 0 ? null : numOrNull(r[c.lkr]);
+    by.set(cusdec + "|" + inv.toUpperCase().replace(/\s+/g, ""), {
+      cusdec_no: cusdec,
+      cusdec_date: c.date < 0 ? "" : xlText(r[c.date]),
+      cusdec_month: monthFromDate ?? (c.m < 0 ? null : xlText(r[c.m]) || null),
+      invoice_no: inv,
+      currency_type: c.cur < 0 ? "" : str(r[c.cur]).toUpperCase(),
+      ex_rate: rate,
+      invoice_value: fc,
+      customs_value: lkr ?? (rate != null && fc != null ? cents(rate * fc) : null),
+      vat_amount: c.vat < 0 ? null : numOrNull(r[c.vat]),
+      party: c.party < 0 ? "" : str(r[c.party]),
+      description: c.desc < 0 ? "" : str(r[c.desc]),
+    });
+  }
+  const rows = [...by.values()];
+  if (!rows.length) throw new UploadError(`No customs entries were found in sheet “${name}”.`);
+  const value = cents(sum(rows, (r) => r.customs_value ?? 0));
+  return {
+    sheet: name,
+    rows,
+    skipped,
+    text:
+      `Sheet “${name}”: ${rows.length} ${direction} customs entries, customs value ${fmt(value)}.` +
+      (skipped ? ` ${skipped} rows without a CusDec or invoice number were left out.` : "") +
+      " Saving adds or updates these entries and fills the customs columns of matching invoices.",
+  };
+}
+
+/** Blank template for a customs entries upload. */
+export function customsTemplateWorkbook(direction: ReconDirection): XLSX.WorkBook {
+  const head = [
+    "Cusdec No",
+    "Date",
+    "Invoice No",
+    "Currency",
+    "Ex. Rate",
+    "Invoice Value (FC)",
+    "Customs Value (LKR)",
+    ...(direction === "import" ? ["VAT Amount"] : []),
+    direction === "import" ? "Supplier" : "Consignee",
+    "Description",
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([head]);
+  ws["!cols"] = head.map((h) => ({ wch: Math.max(14, h.length + 4) }));
+  XLSX.utils.book_append_sheet(wb, ws, direction === "import" ? "Import Customs Entries" : "Export Customs Entries");
+  return wb;
+}
+
+export const customsTemplateFilename = (direction: ReconDirection) =>
+  (direction === "import" ? "Import" : "Export") + " customs entries template.xlsx";
 
 /** Cage code (column B of the workbook, spaces removed) -> vat_returns field. */
 const CAGE_FIELD: Record<string, CageField> = Object.fromEntries(CAGES.map(([field, code]) => [code, field]));
@@ -482,7 +593,7 @@ function previewText(
 ) {
   return (
     `Sheet “${sheet}”: ${n} rows for ${mLabel(month)}, ${
-      kind === "ledger" ? "input VAT " : kind === "export" ? "net sales " : "VAT "
+      kind === "ledger" ? "input VAT " : kind === "export" ? "net sales " : kind === "import" ? "ledger value " : "VAT "
     }${fmt(total)}.` +
     (skipped ? ` ${skipped} rows outside this month were left out.` : "") +
     (existing ? ` Saving replaces the ${existing} rows already held for this month.` : "")
@@ -516,6 +627,28 @@ const TEMPLATE: Record<UploadKind, { sheet: string; file: string; head: string[]
       "Ex. Rate Custom LKR",
       "Invoice Value as Per USD / EUR",
       "Custom Value",
+      "Short Shipment (3)",
+      "Sales Reversed in the Month (4)",
+      "Updated in Custom Report",
+    ],
+  },
+  import: {
+    sheet: "Import Reconciliation",
+    file: "Import reconciliation",
+    head: [
+      "Invoice No",
+      "Month",
+      "Amount FC (CIF) USD / EUR",
+      "Ex.rate",
+      "Ledger Value (A)",
+      "Cusdec No",
+      "Date",
+      "Month",
+      "Currency Type",
+      "Ex. Rate Custom LKR",
+      "Invoice Value as Per USD / EUR",
+      "Custom Value",
+      "VAT as per Customs",
       "Short Shipment (3)",
       "Sales Reversed in the Month (4)",
       "Updated in Custom Report",

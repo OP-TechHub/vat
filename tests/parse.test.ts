@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
-import { parseDocumentIndex, parseExport, parseLedger, parseReturnWorkbook, parseSchedule, templateWorkbook, UploadError } from "@/lib/parse";
+import { customsTemplateWorkbook, parseCustoms, parseDocumentIndex, parseExport, parseLedger, parseReturnWorkbook, parseSchedule, templateWorkbook, UploadError } from "@/lib/parse";
 import { kindFromText, kindsFromText, matchDocuments, missingFiles, periodFromText } from "@/lib/matchDocuments";
 import { monthsBetween, periodCode } from "@/lib/format";
 
@@ -405,5 +405,78 @@ describe("matching documents to periods", () => {
     expect(new Set(acks.map((x) => x.period)).size).toBe(30);
     expect(returns.find((x) => x.name === "01_2020-01_2011_VAT-RTN_SCANNED.pdf")?.period).toBe("2020-01");
     expect(missingFiles(pdfs, index)).toEqual([]);
+  });
+});
+
+describe("customs entries and import reconciliation uploads", () => {
+  const sheet = (rows: unknown[][], head: string[], name: string) => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([head, ...rows]), name);
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  };
+
+  it("parses export customs entries, deriving the month from the date and customs value from rate x value", () => {
+    const buf = sheet(
+      [
+        ["30417", 46217, "1715/EXP/OP", "USD", 298.7277, 1486.25, 443984, "Oceanpick", "Fish"],
+        ["30588", "15.07.2026", "1716/EXP/OP", "usd", 304.1918, 127.87, "", "Oceanpick", "Fish"],
+        ["30588", "15.07.2026", "1716 /EXP/OP", "USD", 304.1918, 127.87, 38897, "Oceanpick", "Fish (corrected)"],
+        ["", "", "", "", "", "", "", "", ""],
+        ["Total", "", "", "", "", 1614.12, "", "", ""],
+        ["31351", "", "", "USD", 304.1885, 6916.37, "", "", ""],
+      ],
+      ["Cusdec No", "Cusdec Date", "Invoice No", "Currency", "Ex. Rate", "Invoice Value (FC)", "Customs Value (LKR)", "Consignee", "Description"],
+      "CusDec",
+    );
+    const p = parseCustoms(buf, "export");
+    expect(p.sheet).toBe("CusDec");
+    expect(p.skipped).toBe(2);
+    expect(p.rows).toHaveLength(2);
+    expect(p.rows[0]).toMatchObject({
+      cusdec_no: "30417", invoice_no: "1715/EXP/OP", cusdec_month: "Jul 2026", currency_type: "USD",
+      ex_rate: 298.7277, invoice_value: 1486.25, customs_value: 443984, party: "Oceanpick",
+    });
+    // the repeated CusDec + invoice keeps the last row; blank customs value is computed
+    expect(p.rows[1]).toMatchObject({ cusdec_no: "30588", cusdec_date: "15.07.2026", cusdec_month: "Jul 2026", customs_value: 38897, description: "Fish (corrected)" });
+    expect(parseCustoms(sheet([["1", "", "A", "", 300, 10, "", "", ""]], ["Cusdec No", "Date", "Invoice No", "Currency", "Rate", "FOB", "LKR", "Party", "Goods"], "S"), "export").rows[0].customs_value).toBe(3000);
+  });
+
+  it("reads the VAT column for import customs entries and rejects a sheet without CusDec numbers", () => {
+    const buf = sheet(
+      [["I-9001", 46204, "SUP-INV-77", "EUR", 330.5, 1000, 330500, 59490, "Supplier GmbH", "Machinery"]],
+      ["Cusdec No", "Date", "Invoice No", "Currency", "Ex. Rate", "Invoice Value (FC)", "Customs Value (LKR)", "VAT Amount", "Supplier", "Description"],
+      "Import Entries",
+    );
+    const p = parseCustoms(buf, "import");
+    expect(p.rows[0]).toMatchObject({ cusdec_no: "I-9001", invoice_no: "SUP-INV-77", currency_type: "EUR", vat_amount: 59490, party: "Supplier GmbH" });
+    expect(() => parseCustoms(sheet([["x", 1]], ["Invoice No", "Amount"], "S"), "import")).toThrow(/Cusdec No/);
+  });
+
+  it("parses an import purchase report with the VAT as per customs column", () => {
+    const buf = sheet(
+      [
+        ["SUP-INV-77", "July", 1000, 328.1, 328100, "I-9001", "", "", "EUR", 330.5, 1000, 330500, 59490, "", "", ""],
+        ["SUP-INV-78", "July", 500, 328.1, "", "", "", "", "", "", "", "", "", "", "", ""],
+      ],
+      ["Invoice No", "Month", "Amount FC (CIF) USD / EUR", "Ex.rate", "Ledger Value (A)", "Cusdec No", "Date", "Month", "Currency Type", "Ex. Rate Custom LKR", "Invoice Value as Per USD / EUR", "Custom Value", "VAT as per Customs", "Short Shipment (3)", "Sales Reversed in the Month (4)", "Updated in Custom Report"],
+      "Import Reconciliation",
+    );
+    const p = parseExport(buf, "2026-07", 0, "import");
+    expect(p.kind).toBe("import");
+    expect(p.rows[0]).toMatchObject({ invoice_no: "SUP-INV-77", net_sales: 328100, custom_vat_amount: 59490, currency_type: "EUR", custom_value: 330500 });
+    expect(p.rows[1]).toMatchObject({ net_sales: 164050, custom_vat_amount: null });
+    expect(p.text).toMatch(/ledger value 492,150\.00/);
+  });
+
+  it("the import and customs templates match templates/", () => {
+    for (const [wb, file] of [
+      [templateWorkbook("import"), "Import reconciliation template.xlsx"],
+      [customsTemplateWorkbook("export"), "Export customs entries template.xlsx"],
+      [customsTemplateWorkbook("import"), "Import customs entries template.xlsx"],
+    ] as const) {
+      const tpl = XLSX.read(read("templates/" + file), { type: "array" });
+      expect(wb.SheetNames).toEqual(tpl.SheetNames);
+      expect(headersOf(wb)).toEqual(headersOf(tpl));
+    }
   });
 });
