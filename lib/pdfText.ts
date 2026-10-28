@@ -16,7 +16,9 @@ export async function extractTextItems(data: ArrayBuffer | Uint8Array): Promise<
     // Copied from node_modules/pdfjs-dist/build/pdf.worker.min.mjs into public/.
     pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
   }
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  // pdf.js transfers the buffer to its worker, which detaches it: hand it a copy so the caller's
+  // bytes stay usable (the OCR step reads the same file again when there is no text layer).
+  const bytes = (data instanceof Uint8Array ? data : new Uint8Array(data)).slice();
   const doc = await pdfjs.getDocument({ data: bytes, useSystemFonts: true, disableFontFace: true }).promise;
   const out: TextItem[] = [];
   try {

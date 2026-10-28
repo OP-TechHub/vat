@@ -59,16 +59,27 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     try {
       const [{ extractTextItems }, { parseCusdec }] = await Promise.all([import("@/lib/pdfText"), import("@/lib/cusdec")]);
       for (let i = 0; i < files.length; i++) {
-        setBusy(`Reading ${i + 1} of ${files.length}: ${files[i].name}…`);
+        const label = `${i + 1} of ${files.length}: ${files[i].name}`;
+        setBusy(`Reading ${label}…`);
         try {
-          const items = await extractTextItems(await files[i].arrayBuffer());
-          const r = parseCusdec(items, direction);
+          const buf = await files[i].arrayBuffer();
+          let items = await extractTextItems(buf);
+          let scanned = false;
+          if (items.length < 20) {
+            // No text layer: a scan. Read the page images with OCR (slower; a few seconds per page).
+            scanned = true;
+            const { ocrPdfToTextItems } = await import("@/lib/ocr");
+            items = await ocrPdfToTextItems(buf, (p) =>
+              setBusy(`Reading ${label} with OCR, page ${p.page} of ${p.pages}, ${Math.round(p.progress * 100)}%…`),
+            );
+          }
+          const r = parseCusdec(items, direction, { loose: scanned });
           if (!r.row.cusdec_no && !r.row.invoice_value) {
-            failed.push(`${files[i].name}: no CusDec found (a scanned image needs OCR; only ASYCUDA text PDFs are read).`);
+            failed.push(`${files[i].name}: no CusDec found${scanned ? " even with OCR; check the scan is upright and legible" : ""}.`);
             continue;
           }
           rows.push(r.row);
-          notes.push([`From ${files[i].name}`, ...r.warnings]);
+          notes.push([`From ${files[i].name}${scanned ? " (scanned, read by OCR: check every figure)" : ""}`, ...r.warnings]);
         } catch (err) {
           failed.push(`${files[i].name}: ${err instanceof Error ? err.message : String(err)}`);
         }

@@ -15,3 +15,6 @@ npm-debug.log*
 Standard Named/
 VAT Return_Upload*.xlsx
 custom/
+
+# OCR language model downloaded by tesseract.js when tests run under Node
+*.traineddata

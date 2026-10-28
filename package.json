@@ -16,13 +16,16 @@
     "@supabase/supabase-js": "^2.117.2",
     "next": "15.5.27",
     "pdfjs-dist": "^4.10.38",
+    "pngjs": "^7.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "tesseract.js": "^5.1.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4.3.3",
