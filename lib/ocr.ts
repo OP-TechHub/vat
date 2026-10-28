@@ -73,14 +73,19 @@ export function wordsToItems(words: Word[], page: number, scale: PageScale): Tex
   return out;
 }
 
+/**
+ * pdf.js's decoded page image. In the browser a JPEG scan usually arrives as a ready-made bitmap with
+ * `data` left null; under Node (and for other encodings) it is a pixel array of 1, 3 or 4 bytes per pixel.
+ */
 interface PdfImage {
   width: number;
   height: number;
-  data: Uint8ClampedArray | Uint8Array;
+  data?: Uint8ClampedArray | Uint8Array | null;
+  bitmap?: ImageBitmap | null;
 }
 
-/** RGBA pixels from pdf.js's decoded image (1, 3 or 4 bytes per pixel). */
-function toRgba(img: PdfImage): Uint8ClampedArray<ArrayBuffer> {
+/** RGBA pixels from a pdf.js pixel array (1, 3 or 4 bytes per pixel). */
+function toRgba(img: PdfImage & { data: Uint8ClampedArray | Uint8Array }): Uint8ClampedArray<ArrayBuffer> {
   const n = img.width * img.height;
   const ch = img.data.length / n;
   const out = new Uint8ClampedArray(new ArrayBuffer(n * 4));
@@ -96,9 +101,19 @@ function toRgba(img: PdfImage): Uint8ClampedArray<ArrayBuffer> {
   return out;
 }
 
-/** Something Tesseract can read: ImageData in the browser, a PNG buffer under Node. */
+/** Something Tesseract can read: a canvas or ImageData in the browser, a PNG buffer under Node. */
 async function toImage(img: PdfImage): Promise<ImageLike> {
-  const rgba = toRgba(img);
+  if (img.bitmap && typeof document !== "undefined") {
+    const c = document.createElement("canvas");
+    c.width = img.width;
+    c.height = img.height;
+    const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("Could not create a canvas to read the scan.");
+    ctx.drawImage(img.bitmap, 0, 0);
+    return c;
+  }
+  if (!img.data) throw new Error("The page image could not be decoded.");
+  const rgba = toRgba({ ...img, data: img.data });
   if (typeof document !== "undefined" && typeof ImageData !== "undefined") return new ImageData(rgba, img.width, img.height);
   const { PNG } = await import("pngjs");
   const png = new PNG({ width: img.width, height: img.height });
