@@ -226,6 +226,26 @@ export type ExportEditable = Pick<
   | "updated_in_custom_report"
 >;
 
+/** Row of customs_entries: one customs declaration line as stored. */
+export interface CustomsEntry {
+  id: string;
+  company_id: string;
+  direction: ReconDirection;
+  cusdec_no: string;
+  cusdec_date: string | null;
+  cusdec_month: string | null;
+  invoice_no: string;
+  currency_type: string | null;
+  ex_rate: number | null;
+  invoice_value: number | null;
+  customs_value: number | null;
+  vat_amount: number | null;
+  party: string | null;
+  description: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
 /** Parsed customs entry (CusDec line) ready for replace_customs_entries. Null = not in the file. */
 export interface CustomsUploadRow {
   cusdec_no: string;

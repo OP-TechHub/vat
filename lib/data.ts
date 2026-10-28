@@ -1,5 +1,16 @@
 import type { Db } from "./supabase/schema";
-import type { Company, ExportSale, Invoice, IrdStatus, ReconDirection, ReturnDocument, Role, ScheduleLine, VatReturn } from "./types";
+import type {
+  Company,
+  CustomsEntry,
+  ExportSale,
+  Invoice,
+  IrdStatus,
+  ReconDirection,
+  ReturnDocument,
+  Role,
+  ScheduleLine,
+  VatReturn,
+} from "./types";
 import { yearRange } from "./format";
 
 const PAGE = 1000;
@@ -114,6 +125,20 @@ export function loadRecon(sb: Db, direction: ReconDirection, companyId: string, 
       .order("sales_month")
       .order("invoice_no")
       .order("id")
+      .range(a, b),
+  );
+}
+
+/** All customs entries of one direction for the company (a few hundred rows a year at most). */
+export function loadCustomsEntries(sb: Db, direction: ReconDirection, companyId: string): Promise<CustomsEntry[]> {
+  return fetchAll<CustomsEntry>((a, b) =>
+    sb
+      .from("customs_entries")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("direction", direction)
+      .order("cusdec_no")
+      .order("invoice_no")
       .range(a, b),
   );
 }

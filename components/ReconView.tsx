@@ -4,12 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
 import CustomsUpload from "./CustomsUpload";
-import { cents, fmt, mLabel, monthKey, sum } from "@/lib/format";
-import { RECON_TABLE, reloadRecon } from "@/lib/data";
-import type { CurrencyType, ExportEditable, ExportSale, ReconDirection } from "@/lib/types";
+import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
+import { RECON_TABLE, loadCustomsEntries, reloadRecon } from "@/lib/data";
+import { periodFromText } from "@/lib/matchDocuments";
+import type { CurrencyType, CustomsEntry, ExportEditable, ExportSale, ReconDirection } from "@/lib/types";
 
 /** Report month key of a row. */
 const sm = (r: ExportSale) => monthKey(r.sales_month);
+
+/** Month key ("YYYY-MM") of a customs entry, from its date (dd/mm/yyyy, dd.mm.yyyy, yyyy-mm-dd) or month text. */
+const entryMonth = (e: CustomsEntry): string | null => {
+  const d = e.cusdec_date ?? "";
+  let m = d.match(/^(\d{2})[./-](\d{2})[./-](\d{4})/);
+  if (m) return `${m[3]}-${m[2]}`;
+  m = d.match(/^(\d{4})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}`;
+  return periodFromText(e.cusdec_month ?? "");
+};
 
 /** Exchange difference (1): customs value in LKR less the ledger value. */
 export const exchangeDifference = (r: ExportSale): number | null =>
@@ -56,6 +67,35 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
 
   const countFor = (m: string) => rows0.filter((r) => sm(r) === m).length;
 
+  // Customs entries held for this direction, so those without a report invoice yet can be shown.
+  const [entries, setEntries] = useState<CustomsEntry[]>([]);
+  useEffect(() => {
+    if (!company) {
+      setEntries([]);
+      return;
+    }
+    let live = true;
+    loadCustomsEntries(supabase, direction, company.id)
+      .then((e) => live && setEntries(e))
+      .catch(() => live && setEntries([]));
+    return () => {
+      live = false;
+    };
+  }, [supabase, company, direction, rows0]);
+
+  /** Entries whose invoice number matches no loaded row, by CusDec month. */
+  const orphans = useMemo(() => {
+    const have = new Set(rows0.map((r) => norm(r.invoice_no)));
+    const by = new Map<string, CustomsEntry[]>();
+    for (const e of entries) {
+      if (have.has(norm(e.invoice_no))) continue;
+      const k = entryMonth(e);
+      if (!k) continue;
+      by.set(k, [...(by.get(k) ?? []), e]);
+    }
+    return by;
+  }, [entries, rows0]);
+
   // Default the upload month and the view range to the latest month with data, else the first month.
   useEffect(() => {
     const withData = months.filter((k) => rows0.some((r) => sm(r) === k));
@@ -74,11 +114,12 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
   const groups = useMemo(
     () =>
       rangeMonths
-        .map((k) => ({ month: k, rows: rows0.filter((r) => sm(r) === k) }))
-        .filter((g) => g.rows.length),
-    [rangeMonths, rows0],
+        .map((k) => ({ month: k, rows: rows0.filter((r) => sm(r) === k), extra: orphans.get(k) ?? [] }))
+        .filter((g) => g.rows.length || g.extra.length),
+    [rangeMonths, rows0, orphans],
   );
   const all = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  const orphanCount = groups.reduce((n, g) => n + g.extra.length, 0);
 
   async function update(row: ExportSale, patchData: Partial<ExportEditable>) {
     // Customs value follows invoice value x customs rate whenever either of those changes.
@@ -186,6 +227,14 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => exchangeDifference(r) ?? 0))}</span>
           {" · "}
           {all.filter((r) => r.cusdec_no).length} with customs entry
+          {orphanCount > 0 && (
+            <>
+              {" · "}
+              <span className="text-warn">
+                {orphanCount} customs entr{orphanCount === 1 ? "y" : "ies"} without a {isImport ? "purchase" : "sales"} invoice yet
+              </span>
+            </>
+          )}
         </span>
       </div>
 
@@ -243,6 +292,7 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
                   <GroupRows
                     key={g.month}
                     g={g}
+                    extra={g.extra}
                     isImport={isImport}
                     canWrite={canWrite}
                     busyId={busyId}
@@ -260,7 +310,9 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
       </div>
       <div className="note">
         The first five columns come from the uploaded {t.report}. The customs columns are filled automatically from
-        uploaded customs entries with the same invoice number, or entered by hand. Customs value is invoice value ×
+        uploaded customs entries with the same invoice number, or entered by hand. A customs entry whose invoice is
+        not in any uploaded {t.report} is listed under its CusDec month with the first columns blank until that
+        month’s report is uploaded. Customs value is invoice value ×
         customs rate and exchange difference (1) is customs value less {isImport ? "ledger value" : "net sales"}.
         Re-uploading a month keeps customs details already held for the same invoice number.
       </div>
@@ -270,6 +322,7 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
 
 function GroupRows({
   g,
+  extra,
   isImport,
   canWrite,
   busyId,
@@ -279,6 +332,8 @@ function GroupRows({
   Totals,
 }: {
   g: { month: string; rows: ExportSale[] };
+  /** Customs entries of this month with no report invoice yet. */
+  extra: CustomsEntry[];
   isImport: boolean;
   canWrite: boolean;
   busyId: string | null;
@@ -355,6 +410,30 @@ function GroupRows({
           </tr>
         );
       })}
+      {extra.map((e) => (
+        <tr key={"e" + e.id} className="text-muted">
+          <td>
+            {e.invoice_no}{" "}
+            <span className="pill pill-warn">No {isImport ? "purchase" : "sales"} invoice yet</span>
+          </td>
+          <td>{mLabel(g.month)}</td>
+          <td className="num">—</td>
+          <td></td>
+          <td className="num">—</td>
+          <td className="border-l border-line text-ink">{e.cusdec_no}</td>
+          <td className="text-ink">{e.cusdec_date}</td>
+          <td className="text-ink">{e.cusdec_month}</td>
+          <td className="text-ink">{e.currency_type}</td>
+          <td className="num text-ink">{e.ex_rate ?? ""}</td>
+          <td className="num text-ink">{fmt(e.invoice_value)}</td>
+          <td className="num text-ink">{fmt(e.customs_value)}</td>
+          {isImport && <td className="num text-ink">{fmt(e.vat_amount)}</td>}
+          <td className="border-l border-line"></td>
+          <td></td>
+          <td></td>
+          <td className="wrapc">{e.party}</td>
+        </tr>
+      ))}
       <Totals rows={g.rows} label={mLabel(g.month)} />
     </>
   );
