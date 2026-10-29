@@ -167,6 +167,13 @@ body {
   .tbl td input {
     @apply px-1 py-0.5 text-xs;
   }
+  /* Filter boxes under the column headings: scroll with the table, one box per column. */
+  .tbl tr.filters th {
+    @apply static py-1 normal-case tracking-normal;
+  }
+  .tbl tr.filters th input {
+    @apply w-full min-w-[72px] px-1 py-0.5 text-xs font-normal;
+  }
   .stat {
     @apply bg-surface border border-line rounded-md p-3;
   }

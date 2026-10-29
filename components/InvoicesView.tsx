@@ -3,11 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
+import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, monthKey, monthStart, sum } from "@/lib/format";
 import { reloadInvoice } from "@/lib/data";
 import type { Invoice } from "@/lib/types";
 
 const PAGE_SIZE = 250;
+
+/** Filter boxes under the column headings, in column order. */
+const COLUMNS: ColumnSpec[] = [
+  { key: "invoice_no", label: "Invoice no." },
+  { key: "posting_date", label: "Posting date" },
+  { key: "vendor_name", label: "Vendor" },
+  { key: "external_doc_no", label: "External doc. no." },
+  { key: "description", label: "Description" },
+  { key: "amount_lcy", label: "Amount", num: true, className: "num" },
+  { key: "original_invoice", label: "Original VAT invoice" },
+  { key: "status", label: "Status" },
+  { key: "claimed_month", label: "Claimed month" },
+];
 
 type StatusFilter = "" | "c" | "n";
 type OrigFilter = "" | "y" | "n" | "b";
@@ -27,6 +41,8 @@ export default function InvoicesView() {
   const [page, setPage] = useState(0);
   const [upMonth, setUpMonth] = useState(months[0]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const cf = useColumnFilters(COLUMNS);
+  useEffect(() => setPage(0), [cf.filters]);
 
   // Reset filters when the tax year or company changes.
   useEffect(() => {
@@ -50,8 +66,25 @@ export default function InvoicesView() {
           .toLowerCase()
           .includes(s),
       );
-    return r;
-  }, [data.invoices, fMonth, fStatus, fOrig, q]);
+    return cf.apply(r, (x) => ({
+      invoice_no: x.invoice_no,
+      posting_date: x.posting_date,
+      vendor_name: x.vendor_name,
+      external_doc_no: x.external_doc_no,
+      description: x.description,
+      amount_lcy: x.amount_lcy,
+      original_invoice: x.original_invoice ?? "Not marked",
+      status: x.claim_status === "Claimed" ? "Claimed" : "Not claimed",
+      claimed_month:
+        claimValue(x) === "none"
+          ? "Not claimed (manual)"
+          : claimValue(x)
+            ? mLabel(claimValue(x)) + " (manual)"
+            : x.auto_claim_month
+              ? "Auto: " + mLabel(monthKey(x.auto_claim_month))
+              : "Auto: none",
+    }));
+  }, [data.invoices, fMonth, fStatus, fOrig, q, cf.apply]);
 
   const total = useMemo(() => sum(rows, (r) => r.amount_lcy), [rows]);
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
@@ -176,6 +209,7 @@ export default function InvoicesView() {
             }}
           />
         </label>
+        <ClearFilters state={cf} />
         <span className="note pb-1.5">
           {rows.length} invoices · <span className="font-mono tabular-nums">{fmt(total)}</span>
         </span>
@@ -195,6 +229,7 @@ export default function InvoicesView() {
               <th>Status</th>
               <th>Claimed month</th>
             </tr>
+            <FilterRow state={cf} />
           </thead>
           <tbody>
             {loading && !data.invoices.length ? (

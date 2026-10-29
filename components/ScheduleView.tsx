@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
+import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, sum } from "@/lib/format";
 import { rm } from "@/lib/reports";
 import { reloadScheduleLine } from "@/lib/data";
@@ -10,10 +11,26 @@ import { LEDGER_AVAILABILITY_LABEL, type LedgerAvailability, type ScheduleLine }
 
 const AVAILABILITY_OPTIONS = Object.keys(LEDGER_AVAILABILITY_LABEL) as LedgerAvailability[];
 
+/** Filter boxes under the column headings, in column order. */
+const COLUMNS: ColumnSpec[] = [
+  { key: "serial_no", label: "Serial" },
+  { key: "invoice_date", label: "Invoice date" },
+  { key: "tax_invoice_no", label: "Tax invoice no." },
+  { key: "supplier_tin", label: "Supplier TIN" },
+  { key: "supplier_name", label: "Supplier" },
+  { key: "description", label: "Description" },
+  { key: "purchase_value", label: "Value of purchase", num: true, className: "num" },
+  { key: "vat_amount", label: "VAT amount", num: true, className: "num" },
+  { key: "ledger_invoice_no", label: "Ledger invoice" },
+  { key: "ledger_availability", label: "Ledger availability" },
+  { key: "ledger_reference", label: "Ledger reference" },
+];
+
 export default function ScheduleView() {
   const { supabase, company, months, data, loading, canWrite, user, patchScheduleLine, flash } = useApp();
   const [month, setMonth] = useState<string>("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const cf = useColumnFilters(COLUMNS);
 
   // Default to the latest month that has a schedule, else the first month of the year.
   useEffect(() => {
@@ -24,7 +41,26 @@ export default function ScheduleView() {
   }, [months, data.schedule, company?.id]);
 
   const k = month || months[0];
-  const rows = useMemo(() => data.schedule.filter((s) => rm(s) === k), [data.schedule, k]);
+  const rows = useMemo(
+    () =>
+      cf.apply(
+        data.schedule.filter((s) => rm(s) === k),
+        (r) => ({
+          serial_no: r.serial_no,
+          invoice_date: r.invoice_date,
+          tax_invoice_no: r.tax_invoice_no,
+          supplier_tin: r.supplier_tin,
+          supplier_name: r.supplier_name,
+          description: r.description,
+          purchase_value: r.purchase_value,
+          vat_amount: r.vat_amount,
+          ledger_invoice_no: r.ledger_invoice_no ?? "Not in ledger list",
+          ledger_availability: LEDGER_AVAILABILITY_LABEL[r.ledger_availability ?? "none"],
+          ledger_reference: r.ledger_reference,
+        }),
+      ),
+    [data.schedule, k, cf.apply],
+  );
   const matched = rows.filter((r) => r.ledger_invoice_no).length;
   const value = sum(rows, (r) => r.purchase_value);
   const vat = sum(rows, (r) => r.vat_amount);
@@ -77,6 +113,7 @@ export default function ScheduleView() {
             ))}
           </select>
         </label>
+        <ClearFilters state={cf} />
         <span className="note pb-1.5">
           {rows.length} lines · purchases <span className="font-mono tabular-nums">{fmt(value)}</span> · VAT{" "}
           <span className="font-mono tabular-nums">{fmt(vat)}</span> · {matched} matched to ledger invoices
@@ -99,6 +136,7 @@ export default function ScheduleView() {
               <th>Ledger availability</th>
               <th>Ledger reference</th>
             </tr>
+            <FilterRow state={cf} />
           </thead>
           <tbody>
             {loading && !data.schedule.length ? (
@@ -110,8 +148,14 @@ export default function ScheduleView() {
             ) : !rows.length ? (
               <tr>
                 <td colSpan={11} className="note">
-                  No schedule saved for {mLabel(k)}.
-                  {canWrite ? " Upload the month’s input schedule above." : ""}
+                  {cf.active ? (
+                    "No lines match the column filters."
+                  ) : (
+                    <>
+                      No schedule saved for {mLabel(k)}.
+                      {canWrite ? " Upload the month’s input schedule above." : ""}
+                    </>
+                  )}
                 </td>
               </tr>
             ) : (

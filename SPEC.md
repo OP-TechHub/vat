@@ -68,6 +68,7 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
    - Status is one of Credit voucher received, Credit voucher pending, Information under submission, or not set; held in `ird_status` with the voucher date and value. Date, value and attachment are editable once the status is received. The voucher is a `return_documents` row of kind `credit_voucher` in the `vat-claims` bucket, with Open / Attach / Replace / Remove.
 6. **Export to Excel**: Invoice Listing (with status and claim month), IRD Submitted Input, VAT Returns.
 7. **Members** (admin only): invite by email, set role, remove.
+8. **Column filters** on the row tables (Invoice listing, IRD input schedule, Export reconciliation, Import Register, Return filing, IRD status): a filter box under every column heading (`components/ColumnFilters.tsx`); contains-match on text, comparisons and ranges on numbers, `blank` for empty cells, yes / no for Yes / No columns; boxes combine; totals follow the filtered rows; Clear button while any is set.
 
 ## Upload formats (`templates/`)
 - Ledger: sheet "Invoice Listing"; Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY), Source Currency Amount.

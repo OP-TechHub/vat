@@ -143,6 +143,10 @@ vercel --prod
 - **Return and acknowledgement documents** (left panel of the VAT reconciliation tab for the selected month, and the Return filing tab for any period): PDF, JPG or PNG up to 25 MB per period, stored in the private `vat-claims` bucket under `<company id>/<YYYY-MM>/<return|acknowledgement>/<filename>`. Members open them through short-lived signed links; editors upload, replace and remove.
 - Dates may be Excel serials or `dd.mm.yyyy`, `dd/mm/yyyy`, `yyyy-mm-dd` text. `.xlsx`, `.xls` and `.csv` are accepted. CSV cells are read as written, so `01/05/2026` is 1 May.
 
+## Column filters
+
+The Invoice listing, IRD input schedule, Export reconciliation, Import Register, Return filing and IRD status tables have a row of filter boxes under the column headings. Typing in a box keeps only the rows whose cell contains that text (case does not matter, and commas in numbers are ignored, so `1313863` finds 1,313,863). Number columns also take `>1000`, `>=`, `<`, `<=`, `=` and a range such as `100..200`; `blank` keeps rows where the cell is empty, and yes / no columns take `yes` or `no`. Boxes combine, totals and counts follow the filtered rows, and a Clear button appears above the table while any box is set.
+
 ## Security notes
 
 - Every route except `/login` is protected by `middleware.ts`, which refreshes the Supabase session cookie and redirects signed-out visitors.

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useApp } from "./AppShell";
 import { DocActions, DocHeading } from "./DocActions";
+import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, monthKey, monthsBetween, periodCode, sum } from "@/lib/format";
 import { loadIrdStatus, type IrdStatusData } from "@/lib/data";
 import { DOC_ACCEPT, documentUrl, isMissingTable, removeDocument, uploadDocument } from "@/lib/documents";
@@ -28,6 +29,20 @@ interface PeriodRow {
 
 /** Number -> "1,234,567.89" for the value box; "" for null. */
 const fmtIn = (n: number | null | undefined) => (n == null ? "" : Number(n).toLocaleString("en-LK", { maximumFractionDigits: 2 }));
+
+/** Filter boxes under the column headings, in column order. */
+const IRD_COLUMNS: ColumnSpec[] = [
+  { key: "period_code", label: "Period code" },
+  { key: "taxable_period", label: "Taxable period" },
+  { key: "deferred", label: "Deferred import VAT", num: true, className: "num" },
+  { key: "refund", label: "Refund due", num: true, className: "num" },
+  { key: "net_refund", label: "Net refund", num: true, className: "num" },
+  { key: "input_less_paid", label: "Input tax less tax paid", num: true, className: "num" },
+  { key: "status", label: "Status" },
+  { key: "voucher_date", label: "Date of credit voucher" },
+  { key: "voucher_value", label: "Value of credit voucher", num: true, className: "num" },
+  { key: "voucher", label: "Credit voucher (yes / no / file name)" },
+];
 
 export default function IrdStatusView() {
   const { supabase, company, user, canWrite, flash } = useApp();
@@ -93,6 +108,7 @@ export default function IrdStatusView() {
   }, [data]);
 
   const periodKeys = useMemo(() => rows.map((r) => r.month).reverse(), [rows]);
+  const cf = useColumnFilters(IRD_COLUMNS);
   const shown = useMemo(() => {
     const lo = from && to && from > to ? to : from;
     const hi = from && to && from > to ? from : to;
@@ -102,8 +118,19 @@ export default function IrdStatusView() {
     if (filter === "data") r = r.filter((x) => x.hasData);
     else if (filter === "unset") r = r.filter((x) => x.hasData && !x.status);
     else if (filter) r = r.filter((x) => x.status === filter);
-    return r;
-  }, [rows, filter, from, to]);
+    return cf.apply(r, (x) => ({
+      period_code: periodCode(x.month),
+      taxable_period: mLabel(x.month),
+      deferred: x.hasData ? x.deferred : "no return data",
+      refund: x.hasData ? x.refund : null,
+      net_refund: x.hasData ? x.netRefund : null,
+      input_less_paid: x.hasData ? x.inputLessPaid : null,
+      status: x.status ? IRD_STATUS_LABEL[x.status] : "Not set",
+      voucher_date: x.voucherDate,
+      voucher_value: x.voucherValue,
+      voucher: x.voucher ? "Yes " + x.voucher.filename : "No",
+    }));
+  }, [rows, filter, from, to, cf.apply]);
 
   async function save(row: PeriodRow, patch: Partial<Pick<IrdStatus, "status" | "voucher_date" | "voucher_value">>) {
     if (!company) return;
@@ -241,6 +268,7 @@ export default function IrdStatusView() {
             Clear range
           </button>
         )}
+        <ClearFilters state={cf} />
         {data && (
           <span className="note pb-1.5">
             {shown.length === rows.length ? `${rows.length} periods` : `${shown.length} of ${rows.length} periods`} · received{" "}
@@ -267,6 +295,7 @@ export default function IrdStatusView() {
               <th className="num">Value of credit voucher</th>
               <DocHeading title="Credit voucher" canWrite={canWrite} />
             </tr>
+            <FilterRow state={cf} />
           </thead>
           <tbody>
             {!data ? (
@@ -278,7 +307,7 @@ export default function IrdStatusView() {
             ) : !shown.length ? (
               <tr>
                 <td colSpan={10} className="note">
-                  No periods match.
+                  {cf.active ? "No periods match the column filters." : "No periods match."}
                 </td>
               </tr>
             ) : (

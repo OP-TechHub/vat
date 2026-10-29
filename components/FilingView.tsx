@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useApp } from "./AppShell";
 import BulkDocumentUpload from "./BulkDocumentUpload";
 import { DocActions, DocHeading } from "./DocActions";
+import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { mLabel, monthKey, monthsBetween, periodCode } from "@/lib/format";
 import { loadFiling, type FilingData } from "@/lib/data";
 import { DOC_ACCEPT, DOC_LABEL, documentUrl, isMissingTable, removeDocument, uploadDocument } from "@/lib/documents";
@@ -21,6 +22,16 @@ interface PeriodRow {
   submittedOn: string | null;
   docs: Partial<Record<DocumentKind, ReturnDocument>>;
 }
+
+/** Filter boxes under the column headings, in column order. */
+const FILING_COLUMNS: ColumnSpec[] = [
+  { key: "period_code", label: "Period code" },
+  { key: "taxable_period", label: "Taxable period" },
+  { key: "submitted_on", label: "Submitted on" },
+  { key: "data_uploaded", label: "Data uploaded (yes / no)" },
+  { key: "return_uploaded", label: "Return uploaded (yes / no / file name)" },
+  { key: "ack_uploaded", label: "Acknowledgement uploaded (yes / no / file name)" },
+];
 
 export default function FilingView() {
   const { supabase, company, user, canWrite, flash } = useApp();
@@ -82,6 +93,7 @@ export default function FilingView() {
 
   // Oldest first for the period selectors.
   const periodKeys = useMemo(() => rows.map((r) => r.month).reverse(), [rows]);
+  const cf = useColumnFilters(FILING_COLUMNS);
   const shown = useMemo(() => {
     const lo = from && to && from > to ? to : from;
     const hi = from && to && from > to ? from : to;
@@ -89,8 +101,15 @@ export default function FilingView() {
     if (lo) r = r.filter((x) => x.month >= lo);
     if (hi) r = r.filter((x) => x.month <= hi);
     if (filter === "missing") r = r.filter((x) => !x.hasData || !x.docs.return || !x.docs.acknowledgement);
-    return r;
-  }, [rows, filter, from, to]);
+    return cf.apply(r, (x) => ({
+      period_code: periodCode(x.month),
+      taxable_period: mLabel(x.month),
+      submitted_on: x.submittedOn,
+      data_uploaded: x.hasData,
+      return_uploaded: x.docs.return ? "Yes " + x.docs.return.filename : "No",
+      ack_uploaded: x.docs.acknowledgement ? "Yes " + x.docs.acknowledgement.filename : "No",
+    }));
+  }, [rows, filter, from, to, cf.apply]);
   const count = (f: (r: PeriodRow) => boolean) => rows.filter(f).length;
 
   function pickDocument(month: string, kind: DocumentKind) {
@@ -206,6 +225,7 @@ export default function FilingView() {
             Clear range
           </button>
         )}
+        <ClearFilters state={cf} />
         {filing && (
           <span className="note pb-1.5">
             {shown.length === rows.length ? `${rows.length} periods` : `${shown.length} of ${rows.length} periods`} from{" "}
@@ -228,6 +248,7 @@ export default function FilingView() {
               <DocHeading title="Return uploaded" canWrite={canWrite} />
               <DocHeading title="Acknowledgement uploaded" canWrite={canWrite} />
             </tr>
+            <FilterRow state={cf} />
           </thead>
           <tbody>
             {!filing ? (
@@ -241,7 +262,9 @@ export default function FilingView() {
                 <td colSpan={6} className="note">
                   {filter === "missing"
                     ? "Every period in this range has its data, return and acknowledgement."
-                    : "No periods in this range."}
+                    : cf.active
+                      ? "No periods match the column filters."
+                      : "No periods in this range."}
                 </td>
               </tr>
             ) : (

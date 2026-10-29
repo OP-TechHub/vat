@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useApp } from "./AppShell";
 import CustomsUpload from "./CustomsUpload";
 import { DocActions, DocHeading } from "./DocActions";
+import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, sum } from "@/lib/format";
 import { cusdecDocumentUrl, removeCusdecDocument, uploadCusdecDocument } from "@/lib/customsDocs";
 import { customsEntryMonth } from "@/lib/matchDocuments";
@@ -16,6 +17,35 @@ interface CusdecDoc {
 }
 
 const UNDATED = "undated";
+
+/** Filter boxes under the column headings, in column order. */
+const COLUMNS: ColumnSpec[] = [
+  { key: "cusdec_no", label: "Cusdec no" },
+  { key: "cusdec_date", label: "Date" },
+  { key: "cusdec_month", label: "Month" },
+  { key: "invoice_no", label: "Invoice no" },
+  { key: "item_no", label: "Item", num: true, className: "num border-l border-line" },
+  { key: "hs_code", label: "HS code" },
+  { key: "description", label: "Description" },
+  { key: "party", label: "Supplier" },
+  { key: "uom", label: "UOM" },
+  { key: "quantity", label: "Quantity", num: true, className: "num" },
+  { key: "currency_type", label: "Currency", className: "border-l border-line" },
+  { key: "ex_rate", label: "Ex. rate", num: true, className: "num" },
+  { key: "invoice_value", label: "Invoice value", num: true, className: "num" },
+  { key: "customs_value", label: "Customs value", num: true, className: "num" },
+  { key: "cid_amount", label: "CID", num: true, className: "num border-l border-line" },
+  { key: "cid_code", label: "CID code" },
+  { key: "pal_amount", label: "PAL", num: true, className: "num" },
+  { key: "pal_code", label: "PAL code" },
+  { key: "sscl_amount", label: "SSCL", num: true, className: "num" },
+  { key: "sscl_code", label: "SSCL code" },
+  { key: "vat_base", label: "Value for VAT", num: true, className: "num" },
+  { key: "vat_amount", label: "VAT", num: true, className: "num" },
+  { key: "vat_type", label: "VAT type" },
+  { key: "vat_code", label: "VAT code" },
+  { key: "doc", label: "CusDec (held / none)", className: "border-l border-line" },
+];
 /** Columns of the register table, for the empty / loading rows. */
 const COLS = 25;
 
@@ -34,6 +64,7 @@ export default function ImportsView() {
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const cf = useColumnFilters(COLUMNS);
 
   /** Entries by month key, in CusDec and item order; entries whose date cannot be read go under UNDATED. */
   const byMonth = useMemo(() => {
@@ -41,12 +72,13 @@ export default function ImportsView() {
     const sorted = [...entries].sort(
       (a, b) => a.cusdec_no.localeCompare(b.cusdec_no) || a.invoice_no.localeCompare(b.invoice_no) || a.item_no - b.item_no,
     );
-    for (const e of sorted) {
+    const shown = cf.apply(sorted, (e) => ({ ...e, doc: e.doc_path ? "Held" : "None" }));
+    for (const e of shown) {
       const k = customsEntryMonth(e) ?? UNDATED;
       m.set(k, [...(m.get(k) ?? []), e]);
     }
     return m;
-  }, [entries]);
+  }, [entries, cf.apply]);
   const countFor = (m: string) => byMonth.get(m)?.length ?? 0;
 
   // Default the view range to the latest month with entries, else the first month of the year.
@@ -211,6 +243,7 @@ export default function ImportsView() {
             ))}
           </select>
         </label>
+        <ClearFilters state={cf} />
         <span className="note pb-1.5">
           {cusdecs(all)} CusDec{cusdecs(all) === 1 ? "" : "s"}, {all.length} item line{all.length === 1 ? "" : "s"} · value for VAT{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.vat_base ?? 0))}</span>
@@ -278,6 +311,7 @@ export default function ImportsView() {
               <th>Code</th>
               <DocHeading title="CusDec" canWrite={canWrite} className="border-l border-line" />
             </tr>
+            <FilterRow state={cf} />
           </thead>
           <tbody>
             {loading && !entries.length ? (
@@ -289,8 +323,14 @@ export default function ImportsView() {
             ) : !groups.length && !undated.length ? (
               <tr>
                 <td colSpan={COLS} className="note">
-                  No import customs entries for {lo === hi ? mLabel(lo) : `${mLabel(lo)} to ${mLabel(hi)}`}.
-                  {canWrite ? " Upload the CusDec PDFs or a spreadsheet of entries above." : ""}
+                  {cf.active ? (
+                    "No lines match the column filters."
+                  ) : (
+                    <>
+                      No import customs entries for {lo === hi ? mLabel(lo) : `${mLabel(lo)} to ${mLabel(hi)}`}.
+                      {canWrite ? " Upload the CusDec PDFs or a spreadsheet of entries above." : ""}
+                    </>
+                  )}
                 </td>
               </tr>
             ) : (

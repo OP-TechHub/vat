@@ -5,6 +5,7 @@ import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
 import CustomsUpload from "./CustomsUpload";
 import { DocActions, DocHeading } from "./DocActions";
+import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
 import { RECON_TABLE, loadCustomsEntries, reloadRecon } from "@/lib/data";
 import { cusdecDocumentUrl, removeCusdecDocument, uploadCusdecDocument } from "@/lib/customsDocs";
@@ -113,6 +114,66 @@ export default function ReconView({
     return m;
   }, [entries]);
 
+  // Filter boxes under the column headings, in column order.
+  const columns = useMemo<ColumnSpec[]>(
+    () => [
+      { key: "invoice_no", label: "Invoice no" },
+      { key: "month", label: "Month" },
+      { key: "amount_fc", label: t.amount, num: true, className: "num" },
+      { key: "ex_rate", label: "Ex. rate", num: true, className: "num" },
+      { key: "net_sales", label: t.net, num: true, className: "num" },
+      { key: "cusdec_no", label: "Cusdec no", className: "border-l border-line" },
+      { key: "cusdec_date", label: "Date" },
+      { key: "cusdec_month", label: "Customs month" },
+      { key: "currency_type", label: "Currency" },
+      { key: "custom_ex_rate", label: "Ex. rate customs", num: true, className: "num" },
+      { key: "custom_invoice_value", label: "Invoice value as per customs", num: true, className: "num" },
+      { key: "custom_value", label: "Customs value", num: true, className: "num" },
+      ...(isImport
+        ? [
+            { key: "custom_vat_base", label: "Value for VAT", num: true, className: "num" },
+            { key: "custom_vat_amount", label: "VAT as per customs", num: true, className: "num" },
+          ]
+        : []),
+      { key: "exchange_difference", label: "Exchange difference", num: true, className: "num border-l border-line" },
+      { key: "short_shipment", label: "Short shipment", num: true, className: "num" },
+      { key: "sales_reversed", label: "Reversed in the month", num: true, className: "num" },
+      { key: "updated_in_custom_report", label: "Updated in customs report" },
+      { key: "doc", label: "CusDec (held / none)", className: "border-l border-line" },
+    ],
+    [isImport, t],
+  );
+  const cf = useColumnFilters(columns);
+  /** Report rows that pass the column filters. */
+  const rowsF = useMemo(
+    () =>
+      cf.apply(rows0, (r) => {
+        const e = entryByInvoice.get(norm(r.invoice_no));
+        return {
+          invoice_no: r.invoice_no,
+          month: mLabel(sm(r)),
+          amount_fc: r.amount_fc,
+          ex_rate: r.ex_rate,
+          net_sales: r.net_sales,
+          cusdec_no: r.cusdec_no,
+          cusdec_date: r.cusdec_date,
+          cusdec_month: r.cusdec_month,
+          currency_type: r.currency_type,
+          custom_ex_rate: r.custom_ex_rate,
+          custom_invoice_value: r.custom_invoice_value,
+          custom_value: r.custom_value,
+          custom_vat_base: r.custom_vat_base,
+          custom_vat_amount: r.custom_vat_amount,
+          exchange_difference: exchangeDifference(r),
+          short_shipment: r.short_shipment,
+          sales_reversed: r.sales_reversed,
+          updated_in_custom_report: r.updated_in_custom_report,
+          doc: e ? (e.doc_path ? "Held" : "None") : "",
+        };
+      }),
+    [rows0, entryByInvoice, cf.apply],
+  );
+
   // CusDec document actions (Open / Upload / Replace / Remove) on the stored customs entry.
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const docFileRef = useRef<HTMLInputElement>(null);
@@ -191,8 +252,28 @@ export default function ReconView({
       } else list.push({ entry: e, customs_value: e.customs_value, vat_base: e.vat_base, vat_amount: e.vat_amount });
       by.set(k, list);
     }
+    // The placeholder rows answer to the same filter boxes.
+    for (const [k, list] of by)
+      by.set(
+        k,
+        cf.apply(list, (o) => ({
+          invoice_no: o.entry.invoice_no,
+          month: mLabel(k),
+          cusdec_no: o.entry.cusdec_no,
+          cusdec_date: o.entry.cusdec_date,
+          cusdec_month: o.entry.cusdec_month,
+          currency_type: o.entry.currency_type,
+          custom_ex_rate: o.entry.ex_rate,
+          custom_invoice_value: o.entry.invoice_value,
+          custom_value: o.customs_value,
+          custom_vat_base: o.vat_base,
+          custom_vat_amount: o.vat_amount,
+          updated_in_custom_report: o.entry.party,
+          doc: o.entry.doc_path ? "Held" : "None",
+        })),
+      );
     return by;
-  }, [entries, rows0]);
+  }, [entries, rows0, cf.apply]);
 
   // Default the upload month and the view range to the latest month with data, else the first month.
   useEffect(() => {
@@ -212,9 +293,9 @@ export default function ReconView({
   const groups = useMemo(
     () =>
       rangeMonths
-        .map((k) => ({ month: k, rows: rows0.filter((r) => sm(r) === k), extra: orphans.get(k) ?? [] }))
+        .map((k) => ({ month: k, rows: rowsF.filter((r) => sm(r) === k), extra: orphans.get(k) ?? [] }))
         .filter((g) => g.rows.length || g.extra.length),
-    [rangeMonths, rows0, orphans],
+    [rangeMonths, rowsF, orphans],
   );
   const all = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   const orphanCount = groups.reduce((n, g) => n + g.extra.length, 0);
@@ -320,6 +401,7 @@ export default function ReconView({
             ))}
           </select>
         </label>
+        <ClearFilters state={cf} />
         <span className="note pb-1.5">
           {all.length} {t.invoiceNoun} · {isImport ? "ledger value" : "net sales"}{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.net_sales))}</span>
@@ -378,6 +460,7 @@ export default function ReconView({
               <th>Updated in customs report</th>
               <DocHeading title="CusDec" canWrite={canWrite} className="border-l border-line" />
             </tr>
+            <FilterRow state={cf} />
           </thead>
           <tbody>
             {loading && !rows0.length ? (
@@ -389,8 +472,14 @@ export default function ReconView({
             ) : !groups.length ? (
               <tr>
                 <td colSpan={COLS} className="note">
-                  No {t.noun} saved for {lo === hi ? mLabel(lo) : `${mLabel(lo)} to ${mLabel(hi)}`}.
-                  {canWrite ? ` Upload a month’s ${t.report} above.` : ""}
+                  {cf.active ? (
+                    "No rows match the column filters."
+                  ) : (
+                    <>
+                      No {t.noun} saved for {lo === hi ? mLabel(lo) : `${mLabel(lo)} to ${mLabel(hi)}`}.
+                      {canWrite ? ` Upload a month’s ${t.report} above.` : ""}
+                    </>
+                  )}
                 </td>
               </tr>
             ) : (
