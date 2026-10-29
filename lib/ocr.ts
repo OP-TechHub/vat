@@ -128,15 +128,42 @@ function shrink(rgba: Uint8ClampedArray, w: number, h: number, f: number): { dat
   return { data: out, w: W, h: H };
 }
 
-/** Something Tesseract can read: a canvas or ImageData in the browser, a PNG buffer under Node. `f` shrinks the image by that factor. */
-async function toImage(img: PdfImage, f = 1): Promise<ImageLike> {
+/** Rotate RGBA pixels by 90 (clockwise) or 270 degrees; the result is h wide and w high. */
+function rotate(rgba: Uint8ClampedArray, w: number, h: number, deg: 90 | 270): Uint8ClampedArray<ArrayBuffer> {
+  const out = new Uint8ClampedArray(new ArrayBuffer(w * h * 4));
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      // New image is h wide: clockwise puts the top row down the right edge.
+      const nx = deg === 90 ? h - 1 - y : y;
+      const ny = deg === 90 ? x : w - 1 - x;
+      const o = (ny * h + nx) * 4;
+      out[o] = rgba[i];
+      out[o + 1] = rgba[i + 1];
+      out[o + 2] = rgba[i + 2];
+      out[o + 3] = 255;
+    }
+  return out;
+}
+
+/**
+ * Something Tesseract can read: a canvas or ImageData in the browser, a PNG buffer under Node.
+ * `f` shrinks the image by that factor; `deg` turns it (90 clockwise or 270) for a sideways scan.
+ */
+async function toImage(img: PdfImage, f = 1, deg: 0 | 90 | 270 = 0): Promise<ImageLike> {
   if (img.bitmap && typeof document !== "undefined") {
     const c = document.createElement("canvas");
-    c.width = Math.floor(img.width / f);
-    c.height = Math.floor(img.height / f);
+    const w = Math.floor(img.width / f);
+    const h = Math.floor(img.height / f);
+    c.width = deg ? h : w;
+    c.height = deg ? w : h;
     const ctx = c.getContext("2d");
     if (!ctx) throw new Error("Could not create a canvas to read the scan.");
-    ctx.drawImage(img.bitmap, 0, 0, c.width, c.height);
+    if (deg) {
+      ctx.translate(c.width / 2, c.height / 2);
+      ctx.rotate((deg * Math.PI) / 180);
+      ctx.drawImage(img.bitmap, -w / 2, -h / 2, w, h);
+    } else ctx.drawImage(img.bitmap, 0, 0, w, h);
     return c;
   }
   if (!img.data) throw new Error("The page image could not be decoded.");
@@ -144,12 +171,19 @@ async function toImage(img: PdfImage, f = 1): Promise<ImageLike> {
   let w = img.width;
   let h = img.height;
   if (f > 1) ({ data: rgba, w, h } = shrink(rgba, w, h, f));
+  if (deg) {
+    rgba = rotate(rgba, w, h, deg);
+    [w, h] = [h, w];
+  }
   if (typeof document !== "undefined" && typeof ImageData !== "undefined") return new ImageData(rgba, w, h);
   const { PNG } = await import("pngjs");
   const png = new PNG({ width: w, height: h });
   png.data = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
   return PNG.sync.write(png);
 }
+
+/** Words that look like words: how much sense an OCR pass made of a page, for choosing its orientation. */
+const wordScore = (res: { text?: string }) => (res.text ?? "").split(/\s+/).filter((w) => /^[A-Za-z]{3,}$/.test(w)).length;
 
 export async function ocrPdfToTextItems(
   data: ArrayBuffer | Uint8Array,
@@ -194,8 +228,21 @@ export async function ocrPdfToTextItems(
       if (!names.length) continue; // nothing scanned on this page
       const images = await Promise.all(names.map((n) => new Promise<PdfImage>((resolve) => page.objs.get(n, resolve))));
       const img = images.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));
-      const image = await toImage(img, f);
-      const scale = { sx: (vp.width / img.width) * f, sy: (vp.height / img.height) * f, pageHeight: vp.height };
+      // A landscape scan of a portrait form was fed in sideways: find which way is up on a rough
+      // quarter-size read of both turns, then read the page turned that way.
+      let deg: 0 | 90 | 270 = 0;
+      if (img.width > img.height * 1.15) {
+        const probe = async (d: 90 | 270) => wordScore((await worker.recognize(await toImage(img, Math.max(f, 4), d), {}, { text: true })).data);
+        const [s90, s270] = [await probe(90), await probe(270)];
+        deg = s90 >= s270 ? 90 : 270;
+      }
+      const image = await toImage(img, f, deg);
+      // Positions in PDF points of the page as it is read: a turned page is taken as portrait.
+      const iw = deg ? img.height : img.width;
+      const ih = deg ? img.width : img.height;
+      const pw = deg ? vp.height : vp.width;
+      const ph = deg ? vp.width : vp.height;
+      const scale = { sx: (pw / iw) * f, sy: (ph / ih) * f, pageHeight: ph };
       const { data: res } = await worker.recognize(image, {}, { blocks: true });
       const words: Word[] = [];
       let line = 0;

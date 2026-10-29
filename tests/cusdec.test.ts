@@ -57,9 +57,9 @@ describe("CusDec PDF extraction", () => {
     });
     expect(r.items[1]).toMatchObject({ item_no: 2, hs_code: "85011090.00", quantity: 20, customs_value: 1055443, pal_amount: 52773, vat_base: 1213760, vat_amount: 218477 });
     expect(r.items[1].description).toMatch(/^C\.R\.I SUBMERSIBLE MOTORS/);
-    // No "INV NO" on this form: the box 44 reference is offered with a warning to check it.
+    // The invoice number always comes from box 44, whether or not it carries an "INV NO:" note.
     expect(r.row.invoice_no).toBe("3RA9001013");
-    expect(r.warnings.some((w) => /box 44/.test(w))).toBe(true);
+    expect(r.warnings.some((w) => /invoice number/i.test(w))).toBe(false);
   });
 
   it.skipIf(!existsSync(exportPdf))("warns when a declaration is uploaded under the wrong direction", async () => {

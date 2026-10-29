@@ -33,6 +33,9 @@ const num = (s: string): number | null => {
 const isNum = (s: string) => /^-?[\d,]+(\.\d+)?$/.test(tidy(s));
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+/** A tax type label in the item's tax table, as printed or as OCR renders it ("C1D", "VID"). */
+const TAX_TYPE = /^(C[I1l]D|PA[Ll1]|SS[Ll1]|SSC[Ll1]|V[TI1l][DO0]|VAT)$/;
+
 /** Tolerance added to every box when reading OCR output, whose positions are approximate. */
 let slack = 0;
 
@@ -104,8 +107,14 @@ export function cusdecPageKind(items: TextItem[], page: number): "main" | "conti
     .join("")
     .replace(/\s+/g, "")
     .toUpperCase();
-  if (/CONTINUATIONSHEET/.test(txt)) return "continuation";
-  if (/CUSTOMSREFERENCENUMBER/.test(txt) || /GOODSDECLARATION/.test(txt) || (/STATISTICALVALUE/.test(txt) && /COMMODITY/.test(txt)))
+  // One wrong letter in a heading is common on a rough scan ("GOODS FECLARATION", "Reforance").
+  if (/CONTINUATI.NSHEET|CONTINUATION.HEET/.test(txt)) return "continuation";
+  if (
+    /CUSTOMSREF.{0,5}NUMBER/.test(txt) ||
+    /GOODS.ECLARATION|GOODSDECLARATI.N/.test(txt) ||
+    /SRI.?LANKACUSTOMS/.test(txt) ||
+    (/STATISTICALVALUE/.test(txt) && /COMMODITY/.test(txt))
+  )
     return "main";
   return null;
 }
@@ -128,6 +137,8 @@ interface TaxLine {
   rate: number | null;
   amount: number | null;
   code: string | null;
+  /** The amount was unreadable or inconsistent and has been computed as base × rate. */
+  computed?: boolean;
 }
 type Taxes = Partial<Record<"CID" | "PAL" | "SSL" | "VAT", TaxLine & { type: string }>>;
 
@@ -139,6 +150,8 @@ interface Item {
   uom: string | null;
   quantity: number | null;
   statistical: number | null;
+  /** Box 46 was unreadable and the statistical value is the CID tax base. */
+  statFromCid?: boolean;
   taxes: Taxes;
 }
 
@@ -148,7 +161,7 @@ interface Item {
  */
 function taxTables(items: TextItem[], page: number): Taxes[] {
   const onPage = items.filter((i) => i.page === page);
-  const TAX = /^(C[I1l]D|PA[Ll1]|SS[Ll1]|SSC[Ll1]|V[TI1l][DO0]|VAT)$/;
+  const TAX = TAX_TYPE;
   /** The printed tax type behind an OCR reading of it. */
   const taxType = (x: string) =>
     /^C[I1l]D$/.test(x) ? "CID" : /^PA[Ll1]$/.test(x) ? "PAL" : /^SS[Ll1]$/.test(x) ? "SSL" : /^SSC[Ll1]$/.test(x) ? "SSCL" : /^V[TI1l][DO0]$/.test(x) ? "VTD" : x;
@@ -195,7 +208,16 @@ function taxTables(items: TextItem[], page: number): Taxes[] {
         .sort((a, b) => a.x - b.x);
       if (row.length < 3) continue;
       const typ = taxType(t.s);
-      const line = { type: typ, base: num(row[0].s), rate: num(row[1].s), amount: num(row[2].s), code: row[3] ? tidy(row[3].s) : null };
+      const line: TaxLine & { type: string } = { type: typ, base: num(row[0].s), rate: num(row[1].s), amount: num(row[2].s), code: row[3] ? tidy(row[3].s) : null };
+      // The amount must be base × rate: OCR drops or shifts separators ("267.4051" for 267,405), so an
+      // amount that disagrees with the base and rate is replaced by the computed one.
+      if (line.base != null && line.rate != null && line.rate >= 0 && line.rate <= 100) {
+        const expected = Math.round(line.base * line.rate) / 100;
+        if (line.amount == null || Math.abs(line.amount - expected) > Math.max(2, 0.02 * expected)) {
+          line.amount = Math.round(expected);
+          line.computed = true;
+        }
+      }
       const key = typ === "SSCL" ? "SSL" : typ === "VTD" ? "VAT" : typ;
       if (key === "CID" || key === "PAL" || key === "SSL" || key === "VAT") out[key] = line;
     }
@@ -265,13 +287,16 @@ function readItems(items: TextItem[]): Item[] {
       const sv = stat && below(block, stat, 22, 2, 120).find((i) => isNum(i.s));
       const taxes = tables[j] ?? {};
       if (!no && !hs_code && !sv && !Object.keys(taxes).length) return; // an empty continuation block
+      // On an import the CID tax base is the same CIF value as box 46, so it stands in when box 46 is unreadable.
+      const statistical = sv ? num(sv.s) : (taxes.CID?.base ?? null);
       out.push({
         item_no: no ? parseInt(tidy(no.s), 10) : null,
         hs_code,
         description,
         uom,
         quantity,
-        statistical: sv ? num(sv.s) : null,
+        statistical,
+        statFromCid: !sv && taxes.CID?.base != null,
         taxes,
       });
     });
@@ -348,6 +373,14 @@ export function parseCusdec(raw: TextItem[], direction: ReconDirection, opts: Pa
   const statistical = parsed.reduce((t, i) => t + (i.statistical ?? 0), 0);
   const fallbackValue = ex_rate != null && invoice_value != null ? r2(ex_rate * invoice_value) : null;
   if (!statFound) warnings.push("Statistical value (box 46) not found; customs value taken as invoice value × rate.");
+  parsed.forEach((it, i) => {
+    const n = it.item_no ?? i + 1;
+    if (it.statFromCid) warnings.push(`Item ${n}: box 46 unreadable; the customs value is the CID tax base.`);
+    const fixed = Object.values(it.taxes)
+      .filter((t) => t?.computed)
+      .map((t) => t!.type);
+    if (fixed.length) warnings.push(`Item ${n}: ${fixed.join(", ")} amount${fixed.length === 1 ? "" : "s"} computed from tax base × rate (misread on the scan).`);
+  });
   if (parsed.length > 1 && parsed.some((i) => i.item_no == null)) warnings.push("An item number (box 32) could not be read; check the item lines.");
   // Cross-check: invoice value × rate should agree with the statistical value, otherwise one of the
   // three figures was misread (an OCR slip, most often). Exports are FOB, so within 1%; the import
@@ -361,49 +394,53 @@ export function parseCusdec(raw: TextItem[], direction: ReconDirection, opts: Pa
       );
   }
 
-  // Invoice number: an "INV NO:" note anywhere on the form (box 44 or the bank reference); else the
-  // reference in box 44 under A.D. (imports); else the bill of lading / AWB number in box 40.
+  // Invoice number: always box 44 (Documents produced), the lines under its "A.D." entry: "INV NO:
+  // EXP-1844" on an export, the bare reference ("31/EXP/26-27", "INV2600050") on an import. The box
+  // ends where the tax table (box 47: Type, Tax Base...) begins.
   let invoice_no = "";
-  const inv = items.map((i) => i.s.match(/\bINV(?:OICE)?\.?\s*NO\.?\s*:?\s*([A-Z0-9][A-Z0-9\-\/\.]*)/i)).find(Boolean);
-  if (inv) invoice_no = inv[1];
-  if (!invoice_no) {
-    // OCR may split "INVOICE NO : EXP-1883" into separate runs; join each line's runs and retry.
-    const lines = new Map<string, string[]>();
-    for (const i of items) {
-      const k = i.page + ":" + Math.round(i.y / 4);
-      lines.set(k, [...(lines.get(k) ?? []), i.s]);
+  const INV = /\bINV(?:OICE)?\.?\s*N[O0]\.?\s*:?\s*([A-Z0-9][A-Z0-9\-\/.]*)/i;
+  // The box's column headings, and the form's side labels (whole or as OCR fragments, "pe Autho-"),
+  // which OCR may glue onto a value.
+  const NOT_REF = /^(A\.?D\.?|Licence\s*No|D\.?Val|D\.?Qty|Type|Tax\s*Base|Rate|Amount|MP|UOM|Qty|Statistical.*)$/i;
+  const SIDE = /^(?:[A-Za-z]{1,3}\s+)?(Autho-?|r?ization|zation|c?ertificates|d?ocuments|uments|p?roduced|ation\s+of|tion\s+of|t?axes)\b[.:]?\s*/i;
+  // Other papers listed in the box that are not the invoice.
+  const OTHER = /^(CPC|B\/?L|AWB|[HM]BL)\b/i;
+  const ad = find(items, /^A\.?D\.?$/);
+  const b44 = ad ?? find(items, /^44\s*Add/i);
+  if (b44) {
+    const x0 = ad ? b44.x : b44.x + 40; // the "44 Add. Info" column label sits left of the box's text
+    // The box ends where the tax table begins: its "Type" heading, or the first tax line (CID, PAL...)
+    // when OCR garbled the heading.
+    const under = items.filter((i) => i.page === b44.page && i.y < b44.y - 2 && i.x >= x0 - 10 - slack && i.x < x0 + 60 + slack);
+    const head = under.filter((i) => /^(Type|Tax\s*Base)$/i.test(i.s) || TAX_TYPE.test(tidy(i.s))).sort((p, q) => q.y - p.y)[0];
+    const floor = head ? head.y + 1 : b44.y - 40 - slack;
+    const inBox = within(items, b44.page, x0 - 45 - slack, x0 + 250 + slack, floor, b44.y + 2 + slack)
+      .map((i) => ({ ...i, s: i.s.replace(SIDE, "").replace(SIDE, "") }))
+      .filter((i) => i.s && !NOT_REF.test(tidy(i.s)));
+    // Lines of the box, top first, each line's runs joined ("INV NO:" and "EXP-1884" may be separate runs).
+    const lines: string[] = [];
+    let last: TextItem | null = null;
+    for (const i of inBox) {
+      if (last && Math.abs(last.y - i.y) <= 3 + slack / 2) lines[lines.length - 1] += " " + i.s;
+      else lines.push(i.s);
+      last = i;
     }
-    for (const parts of lines.values()) {
-      const m = parts.join(" ").match(/\bINV(?:OICE)?\.?\s*NO\.?\s*:?\s*([A-Z0-9][A-Z0-9\-\/\.]*)/i);
-      if (m) {
-        invoice_no = m[1];
-        break;
-      }
-    }
+    // A reference as printed on an import: digits in it, not the "0+0+..." sum, not an amount, not a permit.
+    const looksRef = (v: string) => v.length >= 4 && /\d/.test(v) && !v.includes("+") && !/^\d+\.\d{2}$/.test(v) && !OTHER.test(v);
+    // The reference token of a run that OCR glued to a label fragment ("E 202500033").
+    const refOf = (run: string) => {
+      const toks = tidy(run).split(/\s+/);
+      const v = toks.length === 1 ? toks[0] : toks.filter((t) => looksRef(t)).sort((p, q) => q.length - p.length)[0] ?? "";
+      return looksRef(v) ? v : "";
+    };
+    // An "INV NO:" line anywhere in the box wins; else the reference printed at the right of the box,
+    // as ASYCUDA lays it out; else any reference-like line (a poor scan with the positions off).
+    const noted = lines.map((ln) => ln.match(INV)).find(Boolean);
+    if (noted) invoice_no = noted[1];
+    else invoice_no = inBox.filter((i) => i.x >= x0 + 100 - slack).map((i) => refOf(i.s)).find(Boolean) ?? lines.map(refOf).find(Boolean) ?? "";
   }
-  if (!invoice_no) {
-    // A reference that starts with INV (box 44's document list often carries just "INV2600029").
-    const bare = [...items].sort((a, b) => a.page - b.page).find((i) => /^INV[-\/.]?[A-Z0-9][A-Z0-9\-\/.]{3,}$/i.test(i.s) && !/^INVOICE$/i.test(i.s));
-    if (bare) invoice_no = bare.s;
-  }
-  if (!invoice_no) {
-    const ad = find(items, /^A\.?D\.?$/);
-    const v =
-      ad && below(items, ad, 30, 0, 260).find((i) => !/^[\d+\-,.]+$/.test(i.s) && !/^INV/i.test(i.s) && !/UOM|Qty|Statistical/i.test(i.s) && i.s.length > 2);
-    if (v) {
-      invoice_no = v.s;
-      warnings.push(`Invoice number taken from box 44 (${v.s}); check it against the purchase ledger.`);
-    }
-  }
-  if (!invoice_no) {
-    const b40 = find(items, /^40 Previous/);
-    const v = b40 && below(items, b40, 20, 2, 150)[0];
-    if (v) {
-      invoice_no = v.s;
-      warnings.push(`No invoice number on the form; the BL / AWB number (${v.s}) was used.`);
-    }
-  }
-  if (!invoice_no) warnings.push("Invoice number not found; enter it before saving.");
+  // Nothing outside box 44 is taken for the invoice number: an empty or unreadable box leaves it blank.
+  if (!invoice_no) warnings.push("Invoice number not found in box 44; enter it before saving if there is one.");
 
   // Party: the consignee (box 8) for exports, the exporter (box 2) for imports. First line = name.
   const partyLabel = find(items, direction === "export" ? /^8\s*Consignee/i : /^2\s*Exporte/i);
