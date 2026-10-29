@@ -105,7 +105,7 @@ export function DocHeading({ title, canWrite, className }: { title: string; canW
  * Status pill and the action icons for one document slot: Open when held; for editors Upload when
  * empty, or Replace and Remove when held.
  */
-export function DocActions({
+export function DocActions<T extends { filename: string } = ReturnDocument>({
   doc,
   canWrite,
   busy,
@@ -116,12 +116,12 @@ export function DocActions({
   no = "No",
   pillClass,
 }: {
-  doc: ReturnDocument | null | undefined;
+  doc: T | null | undefined;
   canWrite: boolean;
   busy?: boolean;
-  onOpen: (doc: ReturnDocument) => void;
+  onOpen: (doc: T) => void;
   onPick: () => void;
-  onRemove: (doc: ReturnDocument) => void;
+  onRemove: (doc: T) => void;
   yes?: string;
   no?: string;
   /** Pill class when no document is held (default warn). */

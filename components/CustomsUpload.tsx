@@ -4,6 +4,7 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { useApp } from "./AppShell";
 import { customsTemplateFilename, customsTemplateWorkbook, parseCustoms } from "@/lib/parse";
 import { downloadWorkbook } from "@/lib/download";
+import { uploadCusdecDocument } from "@/lib/customsDocs";
 import { fmt } from "@/lib/format";
 import type { CustomsUploadRow, ReconDirection } from "@/lib/types";
 
@@ -11,6 +12,8 @@ interface Pending {
   rows: CustomsUploadRow[];
   /** Per-row notes from the PDF reader (empty for spreadsheet rows). */
   notes: string[][];
+  /** The CusDec file each row came from, kept with the entry on save (null for spreadsheet rows). */
+  files: (File | null)[];
   text: string;
   source: "sheet" | "pdf";
 }
@@ -39,7 +42,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     rd.onload = () => {
       try {
         const p = parseCustoms(rd.result as ArrayBuffer, direction);
-        setPending({ rows: p.rows, notes: p.rows.map(() => []), text: p.text, source: "sheet" });
+        setPending({ rows: p.rows, notes: p.rows.map(() => []), files: p.rows.map(() => null), text: p.text, source: "sheet" });
       } catch (err) {
         setParseError(err instanceof Error ? err.message : "Could not read the file.");
       }
@@ -55,6 +58,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     setPending(null);
     const rows: CustomsUploadRow[] = [];
     const notes: string[][] = [];
+    const pdfFiles: File[] = [];
     const failed: string[] = [];
     try {
       const [{ extractTextItems }, { parseCusdec }] = await Promise.all([import("@/lib/pdfText"), import("@/lib/cusdec")]);
@@ -78,8 +82,16 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
             failed.push(`${files[i].name}: no CusDec found${scanned ? " even with OCR; check the scan is upright and legible" : ""}.`);
             continue;
           }
-          rows.push(r.row);
-          notes.push([`From ${files[i].name}${scanned ? " (scanned, read by OCR: check every figure)" : ""}`, ...r.warnings]);
+          // One row per item (HS code line); the header fields repeat on each.
+          r.items.forEach((row, n) => {
+            rows.push(row);
+            pdfFiles.push(files[i]);
+            notes.push(
+              n === 0
+                ? [`From ${files[i].name}${scanned ? " (scanned, read by OCR: check every figure)" : ""}${r.items.length > 1 ? `, item 1 of ${r.items.length}` : ""}`, ...r.warnings]
+                : [`From ${files[i].name}, item ${n + 1} of ${r.items.length}`],
+            );
+          });
         } catch (err) {
           failed.push(`${files[i].name}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -95,12 +107,14 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       return;
     }
     const value = rows.reduce((t, r) => t + (r.customs_value ?? 0), 0);
+    const decls = new Set(pdfFiles).size;
     setPending({
       rows,
       notes,
+      files: pdfFiles,
       source: "pdf",
       text:
-        `${rows.length} CusDec${rows.length === 1 ? "" : "s"} read, customs value ${fmt(value)}. Check the invoice numbers below, then save.` +
+        `${decls} CusDec${decls === 1 ? "" : "s"} read (${rows.length} item line${rows.length === 1 ? "" : "s"}), customs value ${fmt(value)}. Check the invoice numbers below, then save.` +
         (failed.length ? ` Not read: ${failed.join(" ")}` : ""),
     });
   }
@@ -137,12 +151,33 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     }
     const r = (data ?? {}) as { entries?: number; applied?: number };
     const n = pending.rows.length;
+    // Keep the CusDec files with their entries so they can be opened from the table.
+    // Each PDF once, however many item lines it gave; the file is recorded on every line of its declaration.
+    const seen = new Set<File>();
+    const toStore = pending.rows
+      .map((row, i) => ({ row, file: pending.files[i] }))
+      .filter((x) => x.file && !seen.has(x.file) && seen.add(x.file));
+    let stored = 0;
+    const storeErrors: string[] = [];
+    for (let i = 0; i < toStore.length; i++) {
+      const { row, file } = toStore[i];
+      setBusy(`Storing CusDec ${i + 1} of ${toStore.length}…`);
+      try {
+        await uploadCusdecDocument(supabase, company.id, direction, { cusdec_no: row.cusdec_no.trim(), invoice_no: row.invoice_no.trim() }, file!);
+        stored++;
+      } catch (err) {
+        storeErrors.push(`${file!.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    setBusy(null);
     clear();
     await reload();
     flash(
-      `Saved ${r.entries ?? n} ${noun} customs entries; the customs columns of ${r.applied ?? 0} matching ${
-        isImport ? "purchase" : "sales"
-      } invoices were filled in.`,
+      `Saved ${r.entries ?? n} ${noun} customs entries` +
+        (isImport ? " to the Import Register." : `; the customs columns of ${r.applied ?? 0} matching sales invoices were filled in.`) +
+        (toStore.length ? ` ${stored} CusDec file${stored === 1 ? "" : "s"} kept.` : "") +
+        (storeErrors.length ? ` Not kept: ${storeErrors.join("; ")}` : ""),
+      storeErrors.length > 0,
     );
   }
 
@@ -151,13 +186,16 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       <h2 className="text-[15px] font-semibold m-0">Upload {noun} customs entries</h2>
       <div className="note">
         Either choose the CusDec PDFs themselves (the ASYCUDA goods declaration printouts, several at once) and the
-        app reads the customs reference, date, currency, amount, exchange rate, statistical value
-        {isImport ? ", VAT" : ""}, {isImport ? "supplier" : "consignee"} and goods from each form, or choose a
-        spreadsheet of CusDec lines with columns Cusdec No, Date, Invoice No, Currency, Ex. Rate, Invoice Value (FC),
-        Customs Value (LKR){isImport ? ", VAT Amount" : ""}, {isImport ? "Supplier" : "Consignee"}, Description. Each
-        entry is matched to the {isImport ? "purchase" : "sales"} row with the same invoice number and its “As per
-        customs” columns are filled in. Entries are kept, so a month uploaded later is filled too. The same CusDec and
-        invoice number uploaded again updates the earlier entry.
+        app reads the customs reference, date, currency, amount, exchange rate, {isImport ? "supplier" : "consignee"}{" "}
+        and, for every item on the form and its continuation sheets, the HS code, description, unit and quantity,
+        statistical value{isImport ? " and the CID, PAL, SSCL and VAT lines with their MP codes" : ""}; or choose a
+        spreadsheet of CusDec lines with columns Cusdec No, Date, Invoice No, Item No, HS Code, Description, UOM,
+        Quantity, Currency, Ex. Rate, Invoice Value (FC), Customs Value (LKR)
+        {isImport ? ", CID / PAL / SSCL / VAT Amount and Code, VAT Base" : ""}, {isImport ? "Supplier" : "Consignee"}.
+        {isImport
+          ? " Each line goes into the Import Register under its CusDec month."
+          : " Each entry is matched to the sales row with the same invoice number and its “As per customs” columns are filled in; entries are kept, so a month uploaded later is filled too."}{" "}
+        The same CusDec and invoice number uploaded again replaces its earlier lines.
       </div>
       <div className="bar">
         <label className="field">
@@ -203,10 +241,17 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                   <th>Cusdec no</th>
                   <th>Date</th>
                   <th>Invoice no</th>
+                  <th className="num">Item</th>
+                  <th>HS code</th>
+                  <th>Qty</th>
                   <th>Currency</th>
                   <th className="num">Ex. rate</th>
                   <th className="num">Invoice value (FC)</th>
                   <th className="num">Customs value (LKR)</th>
+                  {isImport && <th className="num">CID</th>}
+                  {isImport && <th className="num">PAL</th>}
+                  {isImport && <th className="num">SSCL</th>}
+                  {isImport && <th className="num">Value for VAT</th>}
                   {isImport && <th className="num">VAT</th>}
                   <th>{isImport ? "Supplier" : "Consignee"}</th>
                   {pending.source === "pdf" && <th>Notes</th>}
@@ -237,10 +282,17 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                         onChange={(e) => setRow(i, { invoice_no: e.target.value })}
                       />
                     </td>
+                    <td className="num">{r.item_no}</td>
+                    <td>{r.hs_code ?? ""}</td>
+                    <td className="whitespace-nowrap">{r.quantity == null ? "" : `${r.quantity} ${r.uom ?? ""}`.trim()}</td>
                     <td>{r.currency_type}</td>
                     <td className="num">{r.ex_rate ?? ""}</td>
                     <td className="num">{r.invoice_value == null ? "" : fmt(r.invoice_value)}</td>
                     <td className="num">{r.customs_value == null ? "" : fmt(r.customs_value)}</td>
+                    {isImport && <td className="num">{fmt(r.cid_amount)}</td>}
+                    {isImport && <td className="num">{fmt(r.pal_amount)}</td>}
+                    {isImport && <td className="num">{fmt(r.sscl_amount)}</td>}
+                    {isImport && <td className="num">{fmt(r.vat_base)}</td>}
                     {isImport && <td className="num">{r.vat_amount == null ? "" : fmt(r.vat_amount)}</td>}
                     <td className="wrapc">{r.party}</td>
                     {pending.source === "pdf" && (
@@ -256,7 +308,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                 ))}
                 {pending.rows.length > 200 && (
                   <tr>
-                    <td colSpan={10} className="note">
+                    <td colSpan={17} className="note">
                       … and {pending.rows.length - 200} more rows.
                     </td>
                   </tr>
@@ -266,7 +318,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
           </div>
           <div className="bar">
             <button className="btn btn-primary" type="button" onClick={() => void save()} disabled={!!busy || incomplete > 0}>
-              {busy === "Saving…" ? "Saving…" : `Save ${pending.rows.length} entries and fill customs columns`}
+              {busy === "Saving…" ? "Saving…" : isImport ? `Save ${pending.rows.length} lines to the Import Register` : `Save ${pending.rows.length} entries and fill customs columns`}
             </button>
             <button className="btn" type="button" onClick={clear} disabled={!!busy}>
               Cancel

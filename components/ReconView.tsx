@@ -1,26 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
 import CustomsUpload from "./CustomsUpload";
+import { DocActions, DocHeading } from "./DocActions";
 import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
 import { RECON_TABLE, loadCustomsEntries, reloadRecon } from "@/lib/data";
-import { periodFromText } from "@/lib/matchDocuments";
+import { cusdecDocumentUrl, removeCusdecDocument, uploadCusdecDocument } from "@/lib/customsDocs";
+import { customsEntryMonth } from "@/lib/matchDocuments";
 import type { CurrencyType, CustomsEntry, ExportEditable, ExportSale, ReconDirection } from "@/lib/types";
+
+/** What the CusDec column's action buttons work on. */
+interface CusdecDoc {
+  filename: string;
+  entry: CustomsEntry;
+}
+
+/** A customs declaration with no report row yet: its first item line, with the items' amounts summed. */
+interface OrphanRow {
+  entry: CustomsEntry;
+  customs_value: number | null;
+  vat_base: number | null;
+  vat_amount: number | null;
+}
 
 /** Report month key of a row. */
 const sm = (r: ExportSale) => monthKey(r.sales_month);
-
-/** Month key ("YYYY-MM") of a customs entry, from its date (dd/mm/yyyy, dd.mm.yyyy, yyyy-mm-dd) or month text. */
-const entryMonth = (e: CustomsEntry): string | null => {
-  const d = e.cusdec_date ?? "";
-  let m = d.match(/^(\d{2})[./-](\d{2})[./-](\d{4})/);
-  if (m) return `${m[3]}-${m[2]}`;
-  m = d.match(/^(\d{4})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}`;
-  return periodFromText(e.cusdec_month ?? "");
-};
 
 /** Exchange difference (1): customs value in LKR less the ledger value. */
 export const exchangeDifference = (r: ExportSale): number | null =>
@@ -50,15 +56,27 @@ const TEXT: Record<
   },
 };
 
-/** Export reconciliation and import reconciliation share this screen; `direction` picks the table. */
-export default function ReconView({ direction }: { direction: ReconDirection }) {
-  const { supabase, company, months, data, loading, canWrite, user, patchExportSale, patchImportPurchase, flash } = useApp();
-  const rows0 = direction === "export" ? data.exports : data.imports;
-  const patch = direction === "export" ? patchExportSale : patchImportPurchase;
+/**
+ * Reconciliation of a report against customs entries. Used by the Export reconciliation tab; the import
+ * branch (purchase ledger against customs) is kept for `import_purchases` but the Import Register tab
+ * lists the customs entries directly instead.
+ */
+export default function ReconView({
+  direction,
+  rows: rows0,
+  onPatched: patch,
+}: {
+  direction: ReconDirection;
+  /** Report rows of the tax year. */
+  rows: ExportSale[];
+  /** Called with the re-read row after an inline edit. */
+  onPatched: (row: ExportSale) => void;
+}) {
+  const { supabase, company, months, loading, canWrite, user, flash } = useApp();
   const isImport = direction === "import";
   const t = TEXT[direction];
-  const customsCols = isImport ? 8 : 7;
-  const COLS = 9 + customsCols;
+  const customsCols = isImport ? 9 : 7;
+  const COLS = 10 + customsCols;
 
   const [upMonth, setUpMonth] = useState("");
   const [from, setFrom] = useState("");
@@ -67,8 +85,9 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
 
   const countFor = (m: string) => rows0.filter((r) => sm(r) === m).length;
 
-  // Customs entries held for this direction, so those without a report invoice yet can be shown.
+  // Customs entries held for this direction: for the CusDec column and for entries without a report invoice yet.
   const [entries, setEntries] = useState<CustomsEntry[]>([]);
+  const [docTick, setDocTick] = useState(0);
   useEffect(() => {
     if (!company) {
       setEntries([]);
@@ -81,17 +100,96 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
     return () => {
       live = false;
     };
-  }, [supabase, company, direction, rows0]);
+  }, [supabase, company, direction, rows0, docTick]);
 
-  /** Entries whose invoice number matches no loaded row, by CusDec month. */
+  /** Latest customs entry per invoice number, for the CusDec column. */
+  const entryByInvoice = useMemo(() => {
+    const m = new Map<string, CustomsEntry>();
+    for (const e of entries) {
+      const k = norm(e.invoice_no);
+      const prev = m.get(k);
+      if (!prev || e.created_at > prev.created_at) m.set(k, e);
+    }
+    return m;
+  }, [entries]);
+
+  // CusDec document actions (Open / Upload / Replace / Remove) on the stored customs entry.
+  const [docBusy, setDocBusy] = useState<string | null>(null);
+  const docFileRef = useRef<HTMLInputElement>(null);
+  const docTarget = useRef<CustomsEntry | null>(null);
+  async function onDocFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const entry = docTarget.current;
+    e.target.value = "";
+    if (!file || !entry || !company) return;
+    setDocBusy(entry.id);
+    try {
+      await uploadCusdecDocument(supabase, company.id, direction, entry, file, entry.doc_path);
+      flash(`CusDec ${entry.cusdec_no} file kept.`);
+      setDocTick((n) => n + 1);
+    } catch (err) {
+      flash("Could not upload: " + (err instanceof Error ? err.message : String(err)), true);
+    }
+    setDocBusy(null);
+  }
+  async function openDoc(d: CusdecDoc) {
+    try {
+      window.open(await cusdecDocumentUrl(supabase, d.entry.doc_path!), "_blank", "noopener");
+    } catch (err) {
+      flash("Could not open the file: " + (err instanceof Error ? err.message : String(err)), true);
+    }
+  }
+  async function removeDoc(d: CusdecDoc) {
+    if (!window.confirm(`Remove the CusDec file for ${d.entry.cusdec_no} (${d.filename})?`)) return;
+    setDocBusy(d.entry.id);
+    try {
+      await removeCusdecDocument(supabase, d.entry);
+      flash(`CusDec ${d.entry.cusdec_no} file removed.`);
+      setDocTick((n) => n + 1);
+    } catch (err) {
+      flash("Could not remove: " + (err instanceof Error ? err.message : String(err)), true);
+    }
+    setDocBusy(null);
+  }
+  /** The CusDec cell for a row: nothing without a customs entry, else the document actions. */
+  const docCell = (entry: CustomsEntry | null | undefined): ReactNode =>
+    entry ? (
+      <DocActions<CusdecDoc>
+        doc={entry.doc_path ? { filename: entry.doc_name ?? entry.cusdec_no, entry } : null}
+        canWrite={canWrite}
+        busy={docBusy === entry.id}
+        yes="Held"
+        no="None"
+        pillClass="pill-info"
+        onOpen={(d) => void openDoc(d)}
+        onPick={() => {
+          docTarget.current = entry;
+          docFileRef.current?.click();
+        }}
+        onRemove={(d) => void removeDoc(d)}
+      />
+    ) : (
+      <span className="text-muted">—</span>
+    );
+
+  /** Entries whose invoice number matches no loaded row, by CusDec month, one row per declaration with its items summed. */
   const orphans = useMemo(() => {
     const have = new Set(rows0.map((r) => norm(r.invoice_no)));
-    const by = new Map<string, CustomsEntry[]>();
+    const by = new Map<string, OrphanRow[]>();
     for (const e of entries) {
       if (have.has(norm(e.invoice_no))) continue;
-      const k = entryMonth(e);
+      const k = customsEntryMonth(e);
       if (!k) continue;
-      by.set(k, [...(by.get(k) ?? []), e]);
+      const list = by.get(k) ?? [];
+      const same = list.find((o) => o.entry.cusdec_no === e.cusdec_no && o.entry.invoice_no === e.invoice_no);
+      const add = (a: number | null, b: number | null) => (a == null && b == null ? null : (a ?? 0) + (b ?? 0));
+      if (same) {
+        same.customs_value = add(same.customs_value, e.customs_value);
+        same.vat_base = add(same.vat_base, e.vat_base);
+        same.vat_amount = add(same.vat_amount, e.vat_amount);
+        if (e.item_no < same.entry.item_no) same.entry = e;
+      } else list.push({ entry: e, customs_value: e.customs_value, vat_base: e.vat_base, vat_amount: e.vat_amount });
+      by.set(k, list);
     }
     return by;
   }, [entries, rows0]);
@@ -171,10 +269,12 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
       <td className="num">{fmt(sum(rows, (r) => r.net_sales))}</td>
       <td colSpan={6}></td>
       <td className="num">{fmt(sum(rows, (r) => r.custom_value ?? 0))}</td>
+      {isImport && <td className="num">{fmt(sum(rows, (r) => r.custom_vat_base ?? 0))}</td>}
       {isImport && <td className="num">{fmt(sum(rows, (r) => r.custom_vat_amount ?? 0))}</td>}
       <td className="num">{fmt(sum(rows, (r) => exchangeDifference(r) ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.short_shipment ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.sales_reversed ?? 0))}</td>
+      <td></td>
       <td></td>
     </tr>
   );
@@ -238,6 +338,8 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
         </span>
       </div>
 
+      <input ref={docFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => void onDocFile(e)} />
+
       <div className="scroll">
         <table className="tbl">
           <thead>
@@ -250,6 +352,9 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
               </th>
               <th colSpan={4} className="text-center border-l border-line" style={{ position: "static" }}>
                 Differences
+              </th>
+              <th className="text-center border-l border-line" style={{ position: "static" }}>
+                Document
               </th>
             </tr>
             <tr>
@@ -265,11 +370,13 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
               <th className="num">Ex. rate customs LKR</th>
               <th className="num">Invoice value as per USD / EUR</th>
               <th className="num">Customs value</th>
+              {isImport && <th className="num">Value for VAT (customs)</th>}
               {isImport && <th className="num">VAT as per customs</th>}
               <th className="num border-l border-line">Exchange difference (1)</th>
               <th className="num">Short shipment (3)</th>
               <th className="num">{isImport ? "Reversed in the month (4)" : "Sales reversed in the month (4)"}</th>
               <th>Updated in customs report</th>
+              <DocHeading title="CusDec" canWrite={canWrite} className="border-l border-line" />
             </tr>
           </thead>
           <tbody>
@@ -293,6 +400,8 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
                     key={g.month}
                     g={g}
                     extra={g.extra}
+                    docCell={docCell}
+                    entryFor={(inv) => entryByInvoice.get(norm(inv))}
                     isImport={isImport}
                     canWrite={canWrite}
                     busyId={busyId}
@@ -323,6 +432,8 @@ export default function ReconView({ direction }: { direction: ReconDirection }) 
 function GroupRows({
   g,
   extra,
+  docCell,
+  entryFor,
   isImport,
   canWrite,
   busyId,
@@ -332,8 +443,10 @@ function GroupRows({
   Totals,
 }: {
   g: { month: string; rows: ExportSale[] };
-  /** Customs entries of this month with no report invoice yet. */
-  extra: CustomsEntry[];
+  /** Customs declarations of this month with no report invoice yet. */
+  extra: OrphanRow[];
+  docCell: (entry: CustomsEntry | null | undefined) => ReactNode;
+  entryFor: (invoiceNo: string) => CustomsEntry | undefined;
   isImport: boolean;
   canWrite: boolean;
   busyId: string | null;
@@ -400,6 +513,7 @@ function GroupRows({
             <td className="num">{cell("custom_ex_rate", "num", 6, "w-[100px]")}</td>
             <td className="num">{cell("custom_invoice_value", "num")}</td>
             <td className="num">{cell("custom_value", "num", 2, "w-[130px]")}</td>
+            {isImport && <td className="num">{cell("custom_vat_base", "num", 2, "w-[130px]")}</td>}
             {isImport && <td className="num">{cell("custom_vat_amount", "num", 2, "w-[120px]")}</td>}
             <td className={"num border-l border-line" + (diff != null && diff !== 0 ? "" : " text-muted")}>
               {diff == null ? "" : fmt(diff)}
@@ -407,10 +521,11 @@ function GroupRows({
             <td className="num">{cell("short_shipment", "num")}</td>
             <td className="num">{cell("sales_reversed", "num")}</td>
             <td>{cell("updated_in_custom_report", "text", 0, "w-[120px]")}</td>
+            <td className="border-l border-line">{docCell(entryFor(r.invoice_no))}</td>
           </tr>
         );
       })}
-      {extra.map((e) => (
+      {extra.map(({ entry: e, customs_value, vat_base, vat_amount }) => (
         <tr key={"e" + e.id} className="text-muted">
           <td>
             {e.invoice_no}{" "}
@@ -426,12 +541,14 @@ function GroupRows({
           <td className="text-ink">{e.currency_type}</td>
           <td className="num text-ink">{e.ex_rate ?? ""}</td>
           <td className="num text-ink">{fmt(e.invoice_value)}</td>
-          <td className="num text-ink">{fmt(e.customs_value)}</td>
-          {isImport && <td className="num text-ink">{fmt(e.vat_amount)}</td>}
+          <td className="num text-ink">{fmt(customs_value)}</td>
+          {isImport && <td className="num text-ink">{fmt(vat_base)}</td>}
+          {isImport && <td className="num text-ink">{fmt(vat_amount)}</td>}
           <td className="border-l border-line"></td>
           <td></td>
           <td></td>
           <td className="wrapc">{e.party}</td>
+          <td className="border-l border-line">{docCell(e)}</td>
         </tr>
       ))}
       <Totals rows={g.rows} label={mLabel(g.month)} />

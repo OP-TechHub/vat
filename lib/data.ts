@@ -109,10 +109,6 @@ export function loadExportSales(sb: Db, companyId: string, year: number): Promis
   return loadRecon(sb, "export", companyId, year);
 }
 
-export function loadImportPurchases(sb: Db, companyId: string, year: number): Promise<ExportSale[]> {
-  return loadRecon(sb, "import", companyId, year);
-}
-
 export function loadRecon(sb: Db, direction: ReconDirection, companyId: string, year: number): Promise<ExportSale[]> {
   const { from, to } = yearRange(year);
   return fetchAll<ExportSale>((a, b) =>

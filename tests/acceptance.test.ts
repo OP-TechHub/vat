@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { cents, monthsOf, norm } from "@/lib/format";
 import { matrix, monthWise, retCalc, returnVsLedger, tiles } from "@/lib/reports";
-import type { Invoice, ScheduleLine, VatReturn } from "@/lib/types";
+import type { CustomsEntry, ExportSale, Invoice, ScheduleLine, VatReturn } from "@/lib/types";
 
 type Val = string | number | null;
 
@@ -243,5 +243,34 @@ describe("acceptance checks (SPEC.md, tax year 2026/27)", () => {
     expect(Math.round(c.avail)).toBe(6664675);
     // local purchases tax on the return (1,386,009) agrees with the schedule (1,386,008.84) within a rupee
     expect(Math.abs(c.dSched)).toBeLessThan(1);
+  });
+
+  it("return against uploaded reconciliations: differences equal the cages until something is uploaded", () => {
+    const r = returns[0];
+    const none = retCalc(r, [], invoices);
+    expect(none.expRecon).toBe(0);
+    expect(none.dExpRecon).toBe(+(r.zero_rated ?? 0));
+    expect(none.impRecon).toBe(0);
+    expect(none.dImpRecon).toBe(+(r.imports_value ?? 0));
+    expect(none.locRecon).toBe(0);
+    expect(none.dLocRecon).toBe(+(r.local_value ?? 0));
+
+    const month = r.return_month.slice(0, 7);
+    const row = (sales_month: string, net_sales: number) => ({ sales_month, net_sales }) as unknown as ExportSale;
+    const exports = [row(month + "-01", 1000), row(month + "-01", 250.5), row("2030-01-01", 99999)];
+    const [y, mm] = month.split("-");
+    const entry = (cusdec_date: string, customs_value: number, vat_base: number | null = null) =>
+      ({ cusdec_date, cusdec_month: null, customs_value, vat_base }) as unknown as CustomsEntry;
+    const imports = [entry(`05/${mm}/${y}`, 500, 620), entry(`${y}-${mm}-20`, 300), entry("01/01/2030", 99999, 1)];
+    const c = retCalc(r, schedule, invoices, exports, imports);
+    expect(c.expRecon).toBe(1250.5);
+    expect(c.dExpRecon).toBe(+(r.zero_rated ?? 0) - 1250.5);
+    // value for VAT where read (620), else the customs value (300); entries of other months ignored
+    expect(c.impRecon).toBe(920);
+    expect(c.dImpRecon).toBe(+(r.imports_value ?? 0) - 920);
+    const aprilPurchases = schedule.filter((s) => s.return_month.startsWith(month)).reduce((t, s) => t + s.purchase_value, 0);
+    expect(aprilPurchases).toBeGreaterThan(0);
+    expect(r2(c.locRecon)).toBe(r2(aprilPurchases));
+    expect(r2(c.dLocRecon)).toBe(r2(+(r.local_value ?? 0) - aprilPurchases));
   });
 });

@@ -4,6 +4,16 @@
  */
 import type { DocumentKind } from "./types";
 
+/** Month key ("YYYY-MM") of a customs entry, from its date (dd/mm/yyyy, dd.mm.yyyy, yyyy-mm-dd) or month text. */
+export function customsEntryMonth(e: { cusdec_date: string | null; cusdec_month: string | null }): string | null {
+  const d = e.cusdec_date ?? "";
+  let m = d.match(/^(\d{2})[./-](\d{2})[./-](\d{4})/);
+  if (m) return `${m[3]}-${m[2]}`;
+  m = d.match(/^(\d{4})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}`;
+  return periodFromText(e.cusdec_month ?? "");
+}
+
 const MONTHS: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };

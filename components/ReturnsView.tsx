@@ -54,10 +54,10 @@ export default function ReturnsView() {
     const out: Record<string, { r: VatReturn; c: ReturnCalc }> = {};
     for (const m of have) {
       const r = data.returns.find((x) => rm(x) === m)!;
-      out[m] = { r, c: retCalc(r, data.schedule, data.invoices) };
+      out[m] = { r, c: retCalc(r, data.schedule, data.invoices, data.exports, data.importEntries) };
     }
     return out;
-  }, [have, data.returns, data.schedule, data.invoices]);
+  }, [have, data.returns, data.schedule, data.invoices, data.exports, data.importEntries]);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -302,13 +302,23 @@ export default function ReturnsView() {
                   <Line label="Input schedule VAT total" f={c((x) => x.sched)} />
                   <Line label="Difference to local purchases tax" f={c((x) => x.dSched)} kind="d" />
                   <Line label="Claimed from ledger invoices" f={c((x) => x.ledgerClaimed)} />
+
+                  <Sec label="Return against the uploaded reconciliations and schedule" />
+                  <Line label="Exports per Export reconciliation (net sales)" f={c((x) => x.expRecon)} />
+                  <Line label="Zero rated supplies, goods (D) less exports per reconciliation" f={c((x) => x.dExpRecon)} kind="d" />
+                  <Line label="Imports per Import Register (value for VAT per customs)" f={c((x) => x.impRecon)} />
+                  <Line label="Imports, value (H) less imports per register" f={c((x) => x.dImpRecon)} kind="d" />
+                  <Line label="Local purchases per IRD input schedule (value of purchase)" f={c((x) => x.locRecon)} />
+                  <Line label="Local purchases, value (I) less input schedule value" f={c((x) => x.dLocRecon)} kind="d" />
                 </tbody>
               </table>
             </div>
           )}
           <div className="note">
             Whole rupees, right aligned. Cages 7, 9, 13, 14 and the checks are calculated; the rest are as entered.
-            Differences of less than one rupee are treated as agreed.
+            Differences of less than one rupee are treated as agreed. The last section compares the return with the
+            Export reconciliation and Import Register tabs and the IRD input schedule for the same month; a difference equal to
+            the cage means nothing has been uploaded for that month yet.
           </div>
         </div>
       </div>

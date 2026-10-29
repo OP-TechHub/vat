@@ -285,7 +285,8 @@ export function parseExport(
     short: col(/short ship/),
     rev: col(/sales rev/),
     upd: col(/updated in custom/),
-    cvat: direction === "import" ? col(/vat.*custom/, /custom.*vat/, /deferred/, /vat amount/, /^vat/) : -1,
+    cvbase: direction === "import" ? col(/value for vat/, /vat base/, /taxable value/) : -1,
+    cvat: direction === "import" ? col(/vat as per/, /vat amount/, /deferred/, /custom.*vat/, /^vat$/, /^vat/) : -1,
   };
   // The sheet has two "Month" columns: sales report, then customs. Use the second if present.
   {
@@ -341,7 +342,12 @@ export function parseExport(
       short_shipment: c.short < 0 ? null : numOrNull(r[c.short]),
       sales_reversed: c.rev < 0 ? null : numOrNull(r[c.rev]),
       updated_in_custom_report: c.upd < 0 ? "" : xlText(r[c.upd]),
-      ...(direction === "import" ? { custom_vat_amount: c.cvat < 0 ? null : numOrNull(r[c.cvat]) } : {}),
+      ...(direction === "import"
+        ? {
+            custom_vat_base: c.cvbase < 0 ? null : numOrNull(r[c.cvbase]),
+            custom_vat_amount: c.cvat < 0 ? null : numOrNull(r[c.cvat]),
+          }
+        : {}),
     });
   }
   if (!rows.length) throw noRows(month, name, skipped);
@@ -381,7 +387,20 @@ export function parseCustoms(
     rate: col(/ex\.? ?rate/, /exchange/, /rate/),
     fc: col(/invoice value/, /fob/, /cif/, /fc value/, /value.*(usd|eur|fc)/, /foreign/),
     lkr: col(/customs? value/, /assessed/, /value \(lkr\)/, /lkr/),
-    vat: col(/vat amount/, /deferred/, /^vat/, /vat/),
+    vbase: col(/vat base/, /value for vat/, /tax base/),
+    vat: col(/vat amount/, /deferred/, /^vat$/, /^vat \(/, /^vat$/),
+    vcode: col(/vat code/, /vat mp/),
+    vtype: col(/vat type/),
+    item: col(/item ?(no|number)/, /^item$/),
+    hs: col(/hs ?code/, /commodity/, /^hs$/),
+    uom: col(/^uom/, /unit/),
+    qty: col(/quantity/, /^qty/),
+    cid: col(/^cid$/, /cid amount/, /cid value/, /^cid/),
+    cidc: col(/cid code/, /cid mp/),
+    pal: col(/^pal$/, /pal amount/, /pal value/, /^pal/),
+    palc: col(/pal code/, /pal mp/),
+    sscl: col(/^sscl$/, /^ssl$/, /sscl amount/, /sscl value/, /^sscl/, /^ssl/),
+    ssclc: col(/sscl code/, /ssl code/, /sscl mp/),
     party: col(/consignee/, /exporter/, /importer/, /supplier/, /party/, /^name/),
     desc: col(/description/, /goods/),
     m: col(/^month/),
@@ -403,7 +422,11 @@ export function parseCustoms(
     const rate = c.rate < 0 ? null : numOrNull(r[c.rate], 6);
     const fc = c.fc < 0 ? null : numOrNull(r[c.fc]);
     const lkr = c.lkr < 0 ? null : numOrNull(r[c.lkr]);
-    by.set(cusdec + "|" + inv.toUpperCase().replace(/\s+/g, ""), {
+    const itemNo = c.item < 0 ? null : numOrNull(r[c.item], 0);
+    const item_no = itemNo && itemNo > 0 ? itemNo : 1;
+    const text = (i: number) => (i < 0 ? null : str(r[i]) || null);
+    const amount = (i: number) => (i < 0 ? null : numOrNull(r[i]));
+    by.set(cusdec + "|" + inv.toUpperCase().replace(/\s+/g, "") + "|" + item_no, {
       cusdec_no: cusdec,
       cusdec_date: c.date < 0 ? "" : xlText(r[c.date]),
       cusdec_month: monthFromDate ?? (c.m < 0 ? null : xlText(r[c.m]) || null),
@@ -412,9 +435,22 @@ export function parseCustoms(
       ex_rate: rate,
       invoice_value: fc,
       customs_value: lkr ?? (rate != null && fc != null ? cents(rate * fc) : null),
+      vat_base: c.vbase < 0 || c.vbase === c.vat ? null : numOrNull(r[c.vbase]),
       vat_amount: c.vat < 0 ? null : numOrNull(r[c.vat]),
       party: c.party < 0 ? "" : str(r[c.party]),
       description: c.desc < 0 ? "" : str(r[c.desc]),
+      item_no,
+      hs_code: text(c.hs),
+      uom: text(c.uom),
+      quantity: c.qty < 0 ? null : numOrNull(r[c.qty], 3),
+      cid_amount: amount(c.cid),
+      cid_code: text(c.cidc),
+      pal_amount: amount(c.pal),
+      pal_code: text(c.palc),
+      sscl_amount: amount(c.sscl),
+      sscl_code: text(c.ssclc),
+      vat_type: text(c.vtype),
+      vat_code: text(c.vcode),
     });
   }
   const rows = [...by.values()];
@@ -437,13 +473,19 @@ export function customsTemplateWorkbook(direction: ReconDirection): XLSX.WorkBoo
     "Cusdec No",
     "Date",
     "Invoice No",
+    "Item No",
+    "HS Code",
+    "Description",
+    "UOM",
+    "Quantity",
     "Currency",
     "Ex. Rate",
     "Invoice Value (FC)",
     "Customs Value (LKR)",
-    ...(direction === "import" ? ["VAT Amount"] : []),
+    ...(direction === "import"
+      ? ["CID Amount", "CID Code", "PAL Amount", "PAL Code", "SSCL Amount", "SSCL Code", "VAT Base", "VAT Amount", "VAT Code"]
+      : []),
     direction === "import" ? "Supplier" : "Consignee",
-    "Description",
   ];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([head]);
@@ -648,6 +690,7 @@ const TEMPLATE: Record<UploadKind, { sheet: string; file: string; head: string[]
       "Ex. Rate Custom LKR",
       "Invoice Value as Per USD / EUR",
       "Custom Value",
+      "Value for VAT (Customs)",
       "VAT as per Customs",
       "Short Shipment (3)",
       "Sales Reversed in the Month (4)",

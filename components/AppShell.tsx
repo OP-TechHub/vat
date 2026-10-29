@@ -14,12 +14,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Db } from "@/lib/supabase/schema";
 import { createClient } from "@/lib/supabase/client";
-import { loadExportSales, loadImportPurchases, loadInvoices, loadReturns, loadRole, loadScheduleLines } from "@/lib/data";
+import { loadCustomsEntries, loadExportSales, loadInvoices, loadReturns, loadRole, loadScheduleLines } from "@/lib/data";
 import { monthsOf, taxYearOf, yearLabel } from "@/lib/format";
 import { pm } from "@/lib/reports";
 import { exportWorkbook } from "@/lib/export";
 import { downloadWorkbook } from "@/lib/download";
-import type { Company, ExportSale, Invoice, Role, ScheduleLine, VatReturn } from "@/lib/types";
+import type { Company, CustomsEntry, ExportSale, Invoice, Role, ScheduleLine, VatReturn } from "@/lib/types";
 
 export interface YearData {
   /** Invoices posted in the year, plus ones from other years claimed in this year. */
@@ -28,8 +28,8 @@ export interface YearData {
   returns: VatReturn[];
   /** Export reconciliation rows for sales-report months in the year. */
   exports: ExportSale[];
-  /** Import reconciliation rows for purchase-ledger months in the year. */
-  imports: ExportSale[];
+  /** Import customs entries (CusDec lines) of the company, all years: the Import Register. */
+  importEntries: CustomsEntry[];
 }
 
 export interface AppState {
@@ -54,7 +54,6 @@ export interface AppState {
   patchInvoice: (inv: Invoice) => void;
   patchScheduleLine: (line: ScheduleLine) => void;
   patchExportSale: (row: ExportSale) => void;
-  patchImportPurchase: (row: ExportSale) => void;
   patchReturn: (r: VatReturn) => void;
   flash: (text: string | null, err?: boolean) => void;
 }
@@ -67,7 +66,7 @@ export function useApp(): AppState {
   return v;
 }
 
-const EMPTY: YearData = { invoices: [], schedule: [], returns: [], exports: [], imports: [] };
+const EMPTY: YearData = { invoices: [], schedule: [], returns: [], exports: [], importEntries: [] };
 const LS_COMPANY = "vat.company";
 const LS_YEAR = "vat.year";
 
@@ -84,7 +83,7 @@ const TABS: { href: string; label: string; admin?: boolean }[] = [
   { href: "/invoices", label: "Invoice listing" },
   { href: "/schedule", label: "IRD input schedule" },
   { href: "/exports", label: "Export reconciliation" },
-  { href: "/imports", label: "Import reconciliation" },
+  { href: "/imports", label: "Import Register" },
   { href: "/returns", label: "VAT reconciliation" },
   { href: "/filing", label: "Return filing" },
   { href: "/ird-status", label: "IRD status" },
@@ -167,16 +166,16 @@ export default function AppShell({
           }
           throw e;
         });
-      const [invoices, schedule, returns, exports, imports, r] = await Promise.all([
+      const [invoices, schedule, returns, exports, importEntries, r] = await Promise.all([
         loadInvoices(supabase, companyId, year),
         loadScheduleLines(supabase, companyId, year),
         loadReturns(supabase, companyId, year),
         optional(loadExportSales(supabase, companyId, year), "0004_export_sales.sql"),
-        optional(loadImportPurchases(supabase, companyId, year), "0008_customs_entries.sql"),
+        optional(loadCustomsEntries(supabase, "import", companyId), "0008_customs_entries.sql"),
         loadRole(supabase, companyId, user.id),
       ]);
       if (id !== reqId.current) return;
-      setData({ invoices, schedule, returns, exports, imports });
+      setData({ invoices, schedule, returns, exports, importEntries });
       setRole(r);
       if (missing.length)
         setError(
@@ -208,9 +207,6 @@ export default function AppShell({
   const patchExportSale = useCallback((row: ExportSale) => {
     setData((d) => ({ ...d, exports: d.exports.map((x) => (x.id === row.id ? row : x)) }));
   }, []);
-  const patchImportPurchase = useCallback((row: ExportSale) => {
-    setData((d) => ({ ...d, imports: d.imports.map((x) => (x.id === row.id ? row : x)) }));
-  }, []);
   const patchReturn = useCallback((r: VatReturn) => {
     setData((d) => {
       const others = d.returns.filter((x) => x.return_month !== r.return_month);
@@ -236,7 +232,7 @@ export default function AppShell({
   }, [year]);
 
   function exportExcel() {
-    const { wb, filename } = exportWorkbook(year, data.invoices, data.schedule, data.returns, data.exports, data.imports);
+    const { wb, filename } = exportWorkbook(year, data.invoices, data.schedule, data.returns, data.exports, data.importEntries);
     downloadWorkbook(wb, filename);
   }
 
@@ -260,7 +256,6 @@ export default function AppShell({
     patchInvoice,
     patchScheduleLine,
     patchExportSale,
-    patchImportPurchase,
     patchReturn,
     flash,
   };

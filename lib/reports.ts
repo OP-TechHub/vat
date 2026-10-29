@@ -3,7 +3,8 @@
  * Pure functions over rows from the invoice_claim_status and schedule_line_match views.
  */
 import { monthKey, sum } from "./format";
-import type { Invoice, ReturnField, ScheduleLine, VatReturn } from "./types";
+import { customsEntryMonth } from "./matchDocuments";
+import type { CustomsEntry, ExportSale, Invoice, ReturnField, ScheduleLine, VatReturn } from "./types";
 
 /** Posting month key of an invoice. */
 export const pm = (r: Invoice) => monthKey(r.posting_date);
@@ -11,6 +12,8 @@ export const pm = (r: Invoice) => monthKey(r.posting_date);
 export const cm = (r: Invoice) => (r.claim_status === "Claimed" ? monthKey(r.claim_month) : "");
 export const isClaimed = (r: Invoice) => r.claim_status === "Claimed";
 export const rm = (s: ScheduleLine | VatReturn) => monthKey(s.return_month);
+/** Report month key of an export sale / import purchase row. */
+export const sm = (s: ExportSale) => monthKey(s.sales_month);
 
 export interface Tiles {
   total: { amount: number; count: number };
@@ -216,10 +219,39 @@ export interface ReturnCalc {
   dLoc: number; // exempt - ledger local sales
   dImp: number; // deferred (4) - ledger imports VAT
   ledgerClaimed: number; // ledger value of invoices claimed in this month
+  expRecon: number; // net sales per the Export reconciliation for the month
+  dExpRecon: number; // zero rated goods (D) - export reconciliation net sales
+  impRecon: number; // imports per the Import Register: value for VAT per customs (else customs value) of the entries of the month
+  dImpRecon: number; // imports value (H) - import register value
+  locRecon: number; // value of purchases per the IRD input schedule for the month
+  dLocRecon: number; // local purchases value (I) - input schedule value
 }
 
-export function retCalc(r: VatReturn, schedule: ScheduleLine[], allRows: Invoice[]): ReturnCalc {
+/**
+ * Return checks for one month. `exports` are the Export reconciliation rows and `imports` the import
+ * customs entries (any months; only the return month, by CusDec date, is used). For imports the
+ * customs value for VAT (VTD tax base) is used where read, else the customs value.
+ */
+export function retCalc(
+  r: VatReturn,
+  schedule: ScheduleLine[],
+  allRows: Invoice[],
+  exports: ExportSale[] = [],
+  imports: CustomsEntry[] = [],
+): ReturnCalc {
   const k = rm(r);
+  const expRecon = sum(
+    exports.filter((x) => sm(x) === k),
+    (x) => x.net_sales,
+  );
+  const impRecon = sum(
+    imports.filter((x) => customsEntryMonth(x) === k),
+    (x) => (x.vat_base != null ? +x.vat_base : +(x.customs_value ?? 0)) || 0,
+  );
+  const locRecon = sum(
+    schedule.filter((x) => rm(x) === k),
+    (x) => x.purchase_value,
+  );
   const n = (f: ReturnField) => +(r[f] ?? 0) || 0;
   const t7 = n("imports_deferred") + n("imports_upfront") + n("local_tax");
   const t9 = t7 - n("disallowed");
@@ -252,6 +284,12 @@ export function retCalc(r: VatReturn, schedule: ScheduleLine[], allRows: Invoice
       allRows.filter((x) => cm(x) === k),
       (x) => x.amount_lcy,
     ),
+    expRecon,
+    dExpRecon: n("zero_rated") - expRecon,
+    impRecon,
+    dImpRecon: n("imports_value") - impRecon,
+    locRecon,
+    dLocRecon: n("local_value") - locRecon,
   };
 }
 

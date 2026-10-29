@@ -1,9 +1,11 @@
-/** Excel export: Invoice Listing, IRD Submitted Input, Export Reconciliation, VAT Returns. Ported from the prototype. */
+/** Excel export: Invoice Listing, IRD Submitted Input, Export Reconciliation, Import Register, VAT Returns. Ported from the prototype. */
 import * as XLSX from "xlsx";
 import { cents, mLabel, monthKey, monthsOf, yearLabel } from "./format";
 import { RETURN_FIELDS, cm, isClaimed, pm, rm } from "./reports";
+import { customsEntryMonth } from "./matchDocuments";
 import {
   LEDGER_AVAILABILITY_LABEL,
+  type CustomsEntry,
   type ExportSale,
   type Invoice,
   type ReturnField,
@@ -17,7 +19,7 @@ export function exportWorkbook(
   schedule: ScheduleLine[],
   returns: VatReturn[],
   exports: ExportSale[] = [],
-  imports: ExportSale[] = [],
+  importEntries: CustomsEntry[] = [],
 ): { wb: XLSX.WorkBook; filename: string } {
   const months = monthsOf(year);
   const wb = XLSX.utils.book_new();
@@ -56,16 +58,15 @@ export function exportWorkbook(
       });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sr), "IRD Submitted Input");
 
-  const recon = (rows: ExportSale[], isImport: boolean) => {
-    const out: Record<string, string | number>[] = [];
-    for (const k of months)
-      for (const r of rows.filter((x) => monthKey(x.sales_month) === k))
-        out.push({
+  const ex: Record<string, string | number>[] = [];
+  for (const k of months)
+    for (const r of exports.filter((x) => monthKey(x.sales_month) === k))
+      ex.push({
           "Invoice No": r.invoice_no,
           Month: mLabel(k),
-          [isImport ? "Amount FC (CIF) USD / EUR" : "Amount FC (FOB) USD / EUR"]: r.amount_fc,
+          "Amount FC (FOB) USD / EUR": r.amount_fc,
           "Ex.rate": r.ex_rate ?? "",
-          [isImport ? "Ledger Value (A)" : "Net Sales (A)"]: r.net_sales,
+          "Net Sales (A)": r.net_sales,
           "Cusdec No": r.cusdec_no ?? "",
           Date: r.cusdec_date ?? "",
           "Customs Month": r.cusdec_month ?? "",
@@ -73,18 +74,45 @@ export function exportWorkbook(
           "Ex. Rate Custom LKR": r.custom_ex_rate ?? "",
           "Invoice Value as Per USD / EUR": r.custom_invoice_value ?? "",
           "Custom Value": r.custom_value ?? "",
-          ...(isImport ? { "VAT as per Customs": r.custom_vat_amount ?? "" } : {}),
           "Exchange Difference (1)": r.custom_value == null ? "" : cents(r.custom_value - r.net_sales),
           "Short Shipment (3)": r.short_shipment ?? "",
           "Sales Reversed in the Month (4)": r.sales_reversed ?? "",
           "Updated in Custom Report": r.updated_in_custom_report ?? "",
         });
-    return out;
-  };
-  const ex = recon(exports, false);
   if (ex.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ex), "Export Reconciliation");
-  const im = recon(imports, true);
-  if (im.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(im), "Import Reconciliation");
+
+  const im: Record<string, string | number>[] = [];
+  for (const k of months)
+    for (const e of importEntries.filter((x) => customsEntryMonth(x) === k))
+      im.push({
+        Month: mLabel(k),
+        "Cusdec No": e.cusdec_no,
+        Date: e.cusdec_date ?? "",
+        "Customs Month": e.cusdec_month ?? "",
+        "Invoice No": e.invoice_no,
+        "Item No": e.item_no,
+        "HS Code": e.hs_code ?? "",
+        Description: e.description ?? "",
+        Supplier: e.party ?? "",
+        UOM: e.uom ?? "",
+        Quantity: e.quantity ?? "",
+        Currency: e.currency_type ?? "",
+        "Ex. Rate": e.ex_rate ?? "",
+        "Invoice Value (FC)": e.invoice_value ?? "",
+        "Customs Value (LKR)": e.customs_value ?? "",
+        "CID Amount": e.cid_amount ?? "",
+        "CID Code": e.cid_code ?? "",
+        "PAL Amount": e.pal_amount ?? "",
+        "PAL Code": e.pal_code ?? "",
+        "SSCL Amount": e.sscl_amount ?? "",
+        "SSCL Code": e.sscl_code ?? "",
+        "Value for VAT (Customs)": e.vat_base ?? "",
+        "VAT Amount": e.vat_amount ?? "",
+        "VAT Type": e.vat_type ?? "",
+        "VAT Code": e.vat_code ?? "",
+        "CusDec File": e.doc_name ?? "",
+      });
+  if (im.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(im), "Import Register");
 
   const rr = months
     .map((k) => returns.find((r) => rm(r) === k))

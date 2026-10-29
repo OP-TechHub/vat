@@ -200,6 +200,7 @@ export interface ExportSale {
   custom_ex_rate: number | null;
   custom_invoice_value: number | null;
   custom_value: number | null;
+  custom_vat_base?: number | null; // imports: value on which customs charged VAT (VTD tax base)
   custom_vat_amount?: number | null;
   short_shipment: number | null;
   sales_reversed: number | null;
@@ -220,6 +221,7 @@ export type ExportEditable = Pick<
   | "custom_ex_rate"
   | "custom_invoice_value"
   | "custom_value"
+  | "custom_vat_base"
   | "custom_vat_amount"
   | "short_shipment"
   | "sales_reversed"
@@ -239,14 +241,33 @@ export interface CustomsEntry {
   ex_rate: number | null;
   invoice_value: number | null;
   customs_value: number | null;
+  vat_base: number | null;
   vat_amount: number | null;
   party: string | null;
   description: string | null;
+  /** Item (HS code line) of the declaration: 1 on a single-item CusDec. */
+  item_no: number;
+  hs_code: string | null;
+  uom: string | null;
+  quantity: number | null;
+  cid_amount: number | null;
+  cid_code: string | null;
+  pal_amount: number | null;
+  pal_code: string | null;
+  sscl_amount: number | null;
+  sscl_code: string | null;
+  /** VTD (deferred) or VAT (upfront), as printed on the tax line. */
+  vat_type: string | null;
+  vat_code: string | null;
+  /** The CusDec document in the vat-claims bucket, when one has been kept. */
+  doc_path?: string | null;
+  doc_name?: string | null;
+  doc_uploaded_at?: string | null;
   created_at: string;
   created_by: string | null;
 }
 
-/** Parsed customs entry (CusDec line) ready for replace_customs_entries. Null = not in the file. */
+/** Parsed customs entry (one CusDec item line) ready for replace_customs_entries. Null = not in the file. */
 export interface CustomsUploadRow {
   cusdec_no: string;
   cusdec_date: string;
@@ -256,9 +277,24 @@ export interface CustomsUploadRow {
   ex_rate: number | null;
   invoice_value: number | null;
   customs_value: number | null;
+  vat_base: number | null;
   vat_amount: number | null;
   party: string;
   description: string;
+  /** Item (HS code line) of the declaration: 1 on a single-item CusDec. */
+  item_no: number;
+  hs_code: string | null;
+  uom: string | null;
+  quantity: number | null;
+  cid_amount: number | null;
+  cid_code: string | null;
+  pal_amount: number | null;
+  pal_code: string | null;
+  sscl_amount: number | null;
+  sscl_code: string | null;
+  /** VTD (deferred) or VAT (upfront), as printed on the tax line. */
+  vat_type: string | null;
+  vat_code: string | null;
 }
 
 /** Parsed export-reconciliation row ready for replace_export_month. Null = not given in the file. */
@@ -274,6 +310,7 @@ export interface ExportUploadRow {
   custom_ex_rate: number | null;
   custom_invoice_value: number | null;
   custom_value: number | null;
+  custom_vat_base?: number | null;
   custom_vat_amount?: number | null;
   short_shipment: number | null;
   sales_reversed: number | null;
