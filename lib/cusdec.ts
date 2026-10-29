@@ -148,7 +148,10 @@ interface Item {
  */
 function taxTables(items: TextItem[], page: number): Taxes[] {
   const onPage = items.filter((i) => i.page === page);
-  const TAX = /^(CID|PAL|SSL|SSCL|VTD|VAT)$/;
+  const TAX = /^(C[I1l]D|PA[Ll1]|SS[Ll1]|SSC[Ll1]|V[TI1l][DO0]|VAT)$/;
+  /** The printed tax type behind an OCR reading of it. */
+  const taxType = (x: string) =>
+    /^C[I1l]D$/.test(x) ? "CID" : /^PA[Ll1]$/.test(x) ? "PAL" : /^SS[Ll1]$/.test(x) ? "SSL" : /^SSC[Ll1]$/.test(x) ? "SSCL" : /^V[TI1l][DO0]$/.test(x) ? "VTD" : x;
   let heads = onPage
     .filter((h) => /^Type$/.test(h.s))
     .filter((h) => !onPage.some((s) => /Summary of Taxes/i.test(s.s) && Math.abs(s.y - h.y) < 4 + slack && s.x > h.x && s.x < h.x + 160))
@@ -176,7 +179,7 @@ function taxTables(items: TextItem[], page: number): Taxes[] {
     const bottom = next ? next.y : -1;
     const out: Taxes = {};
     const types = onPage.filter(
-      (i) => /^[A-Z]{2,4}$/.test(i.s) && i.s !== "Type" && Math.abs(i.x - h.x) < 8 + slack && i.y < h.y - 2 && i.y > bottom,
+      (i) => TAX.test(i.s) && Math.abs(i.x - h.x) < 8 + slack && i.y < h.y - 2 && i.y > bottom,
     );
     for (const t of types) {
       // The figures on this label's line: close in height, and closer to this label than to any other.
@@ -191,8 +194,9 @@ function taxTables(items: TextItem[], page: number): Taxes[] {
         )
         .sort((a, b) => a.x - b.x);
       if (row.length < 3) continue;
-      const line = { type: t.s, base: num(row[0].s), rate: num(row[1].s), amount: num(row[2].s), code: row[3] ? tidy(row[3].s) : null };
-      const key = t.s === "SSCL" ? "SSL" : t.s === "VTD" ? "VAT" : t.s;
+      const typ = taxType(t.s);
+      const line = { type: typ, base: num(row[0].s), rate: num(row[1].s), amount: num(row[2].s), code: row[3] ? tidy(row[3].s) : null };
+      const key = typ === "SSCL" ? "SSL" : typ === "VTD" ? "VAT" : typ;
       if (key === "CID" || key === "PAL" || key === "SSL" || key === "VAT") out[key] = line;
     }
     return out;
@@ -253,7 +257,8 @@ function readItems(items: TextItem[]): Item[] {
         : uom2
           ? within(block, page, uom2.x - 2 - slack, uom2.x + 78 + slack, uom2.y + 1, uom2.y + 16 + slack).flatMap((i) => i.s.split(/\s+/))
           : [];
-      uom = toks.find((s) => /^[A-Z]{2,3}$/.test(s)) ?? null;
+      uom = toks.find((s) => /^[A-Z0-9]{2,3}$/.test(s) && !/^\d+$/.test(s)) ?? null;
+      if (uom) uom = /^K?GM$/.test(uom) ? "KGM" : /^N[I1l]U$/.test(uom) ? "NIU" : uom;
       const q = toks.find((s) => isNum(s));
       quantity = q ? num(q) : null;
       const stat = bfind(/^46 Statistical Value/i);
@@ -289,7 +294,7 @@ export function parseCusdec(raw: TextItem[], direction: ReconDirection, opts: Pa
   // Customs Reference Number: the row under the label holds the series letter, number and date.
   let cusdec_no = "";
   let cusdec_date = "";
-  const refLabel = find(items, /Customs Reference Number/);
+  const refLabel = find(items, /Customs\s+Ref\w*\s+Number/i);
   if (refLabel) {
     const all = below(items, refLabel, 20, 2, 160);
     // Only the first printed line under the label: the series letter, number and date.
@@ -317,6 +322,12 @@ export function parseCusdec(raw: TextItem[], direction: ReconDirection, opts: Pa
     const row = below(items, b22, 18, 2, 118);
     currency_type = row.find((i) => /^[A-Z]{3}$/.test(i.s))?.s ?? "";
     invoice_value = num(row.find((i) => isNum(i.s))?.s ?? "");
+  }
+  if (!currency_type) {
+    // The accounting block at the foot repeats it: "Invoice Value: USD 1,960.00".
+    const iv = find(items, /^Invoice Value/i);
+    const cur = iv && items.find((i) => i.page === 1 && Math.abs(i.y - iv.y) < 4 + slack && i.x > iv.x && i.x < iv.x + 120 && /^[A-Z]{3}$/.test(i.s));
+    if (cur) currency_type = cur.s;
   }
   const b23 = find(items, /^23 Exchange Rate/) ?? find(items, /Exchange Rate/);
   if (b23) ex_rate = num(below(items, b23, 18, 2, 62).find((i) => isNum(i.s))?.s ?? "");
@@ -371,7 +382,12 @@ export function parseCusdec(raw: TextItem[], direction: ReconDirection, opts: Pa
     }
   }
   if (!invoice_no) {
-    const ad = find(items, /^A\.D\.$/);
+    // A reference that starts with INV (box 44's document list often carries just "INV2600029").
+    const bare = [...items].sort((a, b) => a.page - b.page).find((i) => /^INV[-\/.]?[A-Z0-9][A-Z0-9\-\/.]{3,}$/i.test(i.s) && !/^INVOICE$/i.test(i.s));
+    if (bare) invoice_no = bare.s;
+  }
+  if (!invoice_no) {
+    const ad = find(items, /^A\.?D\.?$/);
     const v =
       ad && below(items, ad, 30, 0, 260).find((i) => !/^[\d+\-,.]+$/.test(i.s) && !/^INV/i.test(i.s) && !/UOM|Qty|Statistical/i.test(i.s) && i.s.length > 2);
     if (v) {
@@ -390,7 +406,7 @@ export function parseCusdec(raw: TextItem[], direction: ReconDirection, opts: Pa
   if (!invoice_no) warnings.push("Invoice number not found; enter it before saving.");
 
   // Party: the consignee (box 8) for exports, the exporter (box 2) for imports. First line = name.
-  const partyLabel = find(items, direction === "export" ? /^8 Consignee/ : /^2 Exporter/);
+  const partyLabel = find(items, direction === "export" ? /^8\s*Consignee/i : /^2\s*Exporte/i);
   const party = partyLabel ? (below(items, partyLabel, 45, 2, 235).find((i) => !/^TIN:?$/.test(i.s) && !/^\d{10,}$/.test(i.s))?.s ?? "") : "";
 
   const header = { cusdec_no, cusdec_date, cusdec_month: monthKey ? mLabel(monthKey) : null, invoice_no, currency_type, ex_rate, invoice_value, party };
