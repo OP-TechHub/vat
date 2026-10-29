@@ -23,6 +23,38 @@ interface Pending {
  * stored and matched to the export sales / import purchase rows by invoice number, filling the
  * "As per customs" columns; rows uploaded later are filled the same way.
  */
+/** Text or number box that writes back when it loses focus or Enter is pressed; Escape restores the value. */
+function NumOrText({
+  value,
+  kind,
+  className,
+  label,
+  onCommit,
+}: {
+  value: string;
+  kind: "text" | "num";
+  className?: string;
+  label: string;
+  onCommit: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  return (
+    <input
+      className={"control " + (kind === "num" ? "text-right font-mono tabular-nums " : "") + (className ?? "")}
+      type="text"
+      inputMode={kind === "num" ? "decimal" : undefined}
+      value={draft}
+      aria-label={label}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => draft !== value && onCommit(draft)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setDraft(value);
+      }}
+    />
+  );
+}
+
 export default function CustomsUpload({ direction }: { direction: ReconDirection }) {
   const { supabase, company, reload, flash } = useApp();
   const [pending, setPending] = useState<Pending | null>(null);
@@ -61,36 +93,39 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     const pdfFiles: File[] = [];
     const failed: string[] = [];
     try {
-      const [{ extractTextItems }, { parseCusdec }] = await Promise.all([import("@/lib/pdfText"), import("@/lib/cusdec")]);
+      const { readCusdecs } = await import("@/lib/cusdecRead");
       for (let i = 0; i < files.length; i++) {
         const label = `${i + 1} of ${files.length}: ${files[i].name}`;
         setBusy(`Reading ${label}…`);
         try {
-          const buf = await files[i].arrayBuffer();
-          let items = await extractTextItems(buf);
-          let scanned = false;
-          if (items.length < 20) {
-            // No text layer: a scan. Read the page images with OCR (slower; a few seconds per page).
-            scanned = true;
-            const { ocrPdfToTextItems } = await import("@/lib/ocr");
-            items = await ocrPdfToTextItems(buf, (p) =>
-              setBusy(`Reading ${label} with OCR, page ${p.page} of ${p.pages}, ${Math.round(p.progress * 100)}%…`),
+          // A printout, a scanned bundle (invoice, packing list, CusDec...) or a plain scan: the CusDec
+          // pages are found and read, by OCR when there is no usable text layer.
+          const read = await readCusdecs(await files[i].arrayBuffer(), direction, (p) => setBusy(`${label}: ${p.text}`));
+          const found = read.results.filter((r) => r.row.cusdec_no || r.row.invoice_value != null);
+          if (!found.length) {
+            failed.push(
+              `${files[i].name}: no CusDec found in its ${read.pageCount} page${read.pageCount === 1 ? "" : "s"}${read.scanned ? " even with OCR; check the scan is upright and legible" : ""}.`,
             );
-          }
-          const r = parseCusdec(items, direction, { loose: scanned });
-          if (!r.row.cusdec_no && !r.row.invoice_value) {
-            failed.push(`${files[i].name}: no CusDec found${scanned ? " even with OCR; check the scan is upright and legible" : ""}.`);
             continue;
           }
-          // One row per item (HS code line); the header fields repeat on each.
-          r.items.forEach((row, n) => {
-            rows.push(row);
-            pdfFiles.push(files[i]);
-            notes.push(
-              n === 0
-                ? [`From ${files[i].name}${scanned ? " (scanned, read by OCR: check every figure)" : ""}${r.items.length > 1 ? `, item 1 of ${r.items.length}` : ""}`, ...r.warnings]
-                : [`From ${files[i].name}, item ${n + 1} of ${r.items.length}`],
-            );
+          found.forEach((r, d) => {
+            const pages = read.pages[read.results.indexOf(r)] ?? [];
+            const where =
+              read.pageCount > pages.length && pages.length ? ` (page${pages.length === 1 ? "" : "s"} ${pages.join(", ")} of ${read.pageCount})` : "";
+            const which = found.length > 1 ? `, CusDec ${d + 1} of ${found.length}` : "";
+            // One row per item (HS code line); the header fields repeat on each.
+            r.items.forEach((row, n) => {
+              rows.push(row);
+              pdfFiles.push(files[i]);
+              notes.push(
+                n === 0
+                  ? [
+                      `From ${files[i].name}${where}${which}${read.scanned ? " (scanned, read by OCR: check every figure)" : ""}${r.items.length > 1 ? `, item 1 of ${r.items.length}` : ""}`,
+                      ...r.warnings,
+                    ]
+                  : [`From ${files[i].name}${which}, item ${n + 1} of ${r.items.length}`],
+              );
+            });
           });
         } catch (err) {
           failed.push(`${files[i].name}: ${err instanceof Error ? err.message : String(err)}`);
@@ -107,14 +142,14 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       return;
     }
     const value = rows.reduce((t, r) => t + (r.customs_value ?? 0), 0);
-    const decls = new Set(pdfFiles).size;
+    const decls = new Set(rows.map((r, i) => `${pdfFiles.indexOf(pdfFiles[i])}|${r.cusdec_no}|${r.invoice_no}`)).size;
     setPending({
       rows,
       notes,
       files: pdfFiles,
       source: "pdf",
       text:
-        `${decls} CusDec${decls === 1 ? "" : "s"} read (${rows.length} item line${rows.length === 1 ? "" : "s"}), customs value ${fmt(value)}. Check the invoice numbers below, then save.` +
+        `${decls} CusDec${decls === 1 ? "" : "s"} read (${rows.length} item line${rows.length === 1 ? "" : "s"}), customs value ${fmt(value)}. Check the figures below (every box can be corrected), then save.` +
         (failed.length ? ` Not read: ${failed.join(" ")}` : ""),
     });
   }
@@ -128,6 +163,33 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
 
   const setRow = (i: number, patch: Partial<CustomsUploadRow>) =>
     setPending((p) => p && { ...p, rows: p.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+
+  /** A cell of the review table: plain text for spreadsheet rows, a box that writes back for PDF rows (OCR can misread). */
+  const cell = (i: number, r: CustomsUploadRow, field: keyof CustomsUploadRow, kind: "text" | "num", width = "w-[90px]") => {
+    const v = r[field];
+    if (pending?.source !== "pdf") return kind === "num" ? (v == null ? "" : fmt(v as number)) : ((v as string) ?? "");
+    return (
+      <NumOrText
+        key={`${i}:${field}`}
+        kind={kind}
+        value={v == null ? "" : String(v)}
+        className={width}
+        label={`${String(field).replace(/_/g, " ")}, row ${i + 1}`}
+        onCommit={(s) => {
+          if (kind === "text") setRow(i, { [field]: s.trim() || null } as Partial<CustomsUploadRow>);
+          else {
+            const t = s.replace(/,/g, "").trim();
+            const n = t === "" ? null : Number(t);
+            if (n != null && isNaN(n)) {
+              flash(`“${s}” is not a number.`, true);
+              return;
+            }
+            setRow(i, { [field]: n } as Partial<CustomsUploadRow>);
+          }
+        }}
+      />
+    );
+  };
 
   const incomplete = (pending?.rows ?? []).filter((r) => !r.cusdec_no.trim() || !r.invoice_no.trim()).length;
 
@@ -152,11 +214,18 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     const r = (data ?? {}) as { entries?: number; applied?: number };
     const n = pending.rows.length;
     // Keep the CusDec files with their entries so they can be opened from the table.
-    // Each PDF once, however many item lines it gave; the file is recorded on every line of its declaration.
-    const seen = new Set<File>();
+    // Each PDF once per declaration it holds, however many item lines that gave; the file is recorded on
+    // every line of the declaration.
+    const seen = new Set<string>();
     const toStore = pending.rows
       .map((row, i) => ({ row, file: pending.files[i] }))
-      .filter((x) => x.file && !seen.has(x.file) && seen.add(x.file));
+      .filter((x) => {
+        if (!x.file) return false;
+        const k = `${pending.files.indexOf(x.file)}|${x.row.cusdec_no.trim()}|${x.row.invoice_no.trim()}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
     let stored = 0;
     const storeErrors: string[] = [];
     for (let i = 0; i < toStore.length; i++) {
@@ -185,7 +254,8 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     <div className="panel">
       <h2 className="text-[15px] font-semibold m-0">Upload {noun} customs entries</h2>
       <div className="note">
-        Either choose the CusDec PDFs themselves (the ASYCUDA goods declaration printouts, several at once) and the
+        Either choose the CusDec PDFs themselves (ASYCUDA printouts, or scanned bundles where the CusDec sits among the
+        invoice, packing list and other papers: the CusDec pages are found and read, by OCR when needed), several at once, and the
         app reads the customs reference, date, currency, amount, exchange rate, {isImport ? "supplier" : "consignee"}{" "}
         and, for every item on the form and its continuation sheets, the HS code, description, unit and quantity,
         statistical value{isImport ? " and the CID, PAL, SSCL and VAT lines with their MP codes" : ""}; or choose a
@@ -272,7 +342,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                         r.cusdec_no
                       )}
                     </td>
-                    <td>{r.cusdec_date}</td>
+                    <td>{cell(i, r, "cusdec_date", "text", "w-[95px]")}</td>
                     <td>
                       <input
                         className={"control w-[150px]" + (r.invoice_no.trim() ? "" : " border-bad")}
@@ -283,17 +353,25 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                       />
                     </td>
                     <td className="num">{r.item_no}</td>
-                    <td>{r.hs_code ?? ""}</td>
-                    <td className="whitespace-nowrap">{r.quantity == null ? "" : `${r.quantity} ${r.uom ?? ""}`.trim()}</td>
-                    <td>{r.currency_type}</td>
-                    <td className="num">{r.ex_rate ?? ""}</td>
-                    <td className="num">{r.invoice_value == null ? "" : fmt(r.invoice_value)}</td>
-                    <td className="num">{r.customs_value == null ? "" : fmt(r.customs_value)}</td>
-                    {isImport && <td className="num">{fmt(r.cid_amount)}</td>}
-                    {isImport && <td className="num">{fmt(r.pal_amount)}</td>}
-                    {isImport && <td className="num">{fmt(r.sscl_amount)}</td>}
-                    {isImport && <td className="num">{fmt(r.vat_base)}</td>}
-                    {isImport && <td className="num">{r.vat_amount == null ? "" : fmt(r.vat_amount)}</td>}
+                    <td>{cell(i, r, "hs_code", "text", "w-[100px]")}</td>
+                    <td className="whitespace-nowrap">
+                      {pending.source === "pdf" ? (
+                        <>
+                          {cell(i, r, "quantity", "num", "w-[80px]")} {cell(i, r, "uom", "text", "w-[55px]")}
+                        </>
+                      ) : (
+                        r.quantity == null ? "" : `${r.quantity} ${r.uom ?? ""}`.trim()
+                      )}
+                    </td>
+                    <td>{cell(i, r, "currency_type", "text", "w-[55px]")}</td>
+                    <td className="num">{cell(i, r, "ex_rate", "num", "w-[90px]")}</td>
+                    <td className="num">{cell(i, r, "invoice_value", "num", "w-[100px]")}</td>
+                    <td className="num">{cell(i, r, "customs_value", "num", "w-[110px]")}</td>
+                    {isImport && <td className="num">{cell(i, r, "cid_amount", "num")}</td>}
+                    {isImport && <td className="num">{cell(i, r, "pal_amount", "num")}</td>}
+                    {isImport && <td className="num">{cell(i, r, "sscl_amount", "num")}</td>}
+                    {isImport && <td className="num">{cell(i, r, "vat_base", "num", "w-[110px]")}</td>}
+                    {isImport && <td className="num">{cell(i, r, "vat_amount", "num", "w-[100px]")}</td>}
                     <td className="wrapc">{r.party}</td>
                     {pending.source === "pdf" && (
                       <td className="wrapc">
