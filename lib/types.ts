@@ -229,7 +229,7 @@ export type ExportEditable = Pick<
 >;
 
 /** Fields of an export sale / import purchase that came from the uploaded report: admins may correct them. */
-export type ExportReportEditable = Pick<ExportSale, "invoice_no" | "amount_fc" | "ex_rate" | "net_sales">;
+export type ExportReportEditable = Pick<ExportSale, "invoice_no" | "sales_month" | "amount_fc" | "ex_rate" | "net_sales">;
 
 /** Row of customs_entries: one customs declaration line as stored. */
 export interface CustomsEntry {

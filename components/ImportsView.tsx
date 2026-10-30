@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useApp } from "./AppShell";
 import CustomsUpload from "./CustomsUpload";
+import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
 import { CustomsDocHeadings, DOC_FILTER_COLUMNS, docFilterValues, useCustomsDocs } from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, sum } from "@/lib/format";
 import { customsEntryMonth } from "@/lib/matchDocuments";
-import { CUSTOMS_HEADER_FIELDS, updateCustomsEntry } from "@/lib/data";
+import { updateCustomsEntry } from "@/lib/data";
 import type { CustomsEditable, CustomsEntry } from "@/lib/types";
 
 const UNDATED = "undated";
@@ -146,10 +147,7 @@ export default function ImportsView() {
     // Header fields print on the first item line of a declaration only; later items repeat them muted.
     const first = !sameDoc(e, prev);
     const hdr = first ? "" : "text-muted";
-    /**
-     * A field's cell: an input while an admin edits (declaration fields on the first item line only, as they
-     * are saved to every line of the CusDec), else the shown value.
-     */
+    /** A field's cell: an input while an admin edits (declaration fields are saved to every line of the CusDec), else the shown value. */
     const cell = (
       field: keyof CustomsEditable,
       shown: ReactNode,
@@ -157,7 +155,7 @@ export default function ImportsView() {
       places = 2,
       width = "w-[100px]",
     ) => {
-      if (!editing || (!first && CUSTOMS_HEADER_FIELDS.includes(field))) return shown;
+      if (!editing) return shown;
       const raw = e[field];
       const value = raw == null ? "" : String(raw);
       return (
@@ -223,6 +221,7 @@ export default function ImportsView() {
   return (
     <>
       {canWrite && <CustomsUpload direction="import" />}
+      {canWrite && <BulkCustomsDocs direction="import" entries={entries} onDone={reload} />}
 
       <div className="bar">
         <label className="field">
@@ -361,7 +360,7 @@ export default function ImportsView() {
         the other documents (invoice, packing list, bill of lading) and all documents as one bundle; upload or open them
         in the Documents columns.
         {isAdmin &&
-          " Admins can correct the uploaded data with “Edit uploaded data”: the declaration columns are edited on the first item line of a CusDec and saved to all its lines. Uploading that CusDec again replaces the corrections."}
+          " Admins can correct the uploaded data with “Edit uploaded data”: every column of every item line, with a declaration column (CusDec, date, month, invoice, supplier, currency, rate, invoice value) saved to all lines of its CusDec. Uploading that CusDec again replaces the corrections."}
       </div>
     </>
   );

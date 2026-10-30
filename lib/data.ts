@@ -199,14 +199,45 @@ export async function updateReconReport(
     .update({ ...patch, updated_by: userId, updated_at: new Date().toISOString() })
     .eq("id", row.id);
   if (error) throw saveError(error.message);
-  if ("invoice_no" in patch) {
+  if ("invoice_no" in patch || "sales_month" in patch) {
     const { error: e2 } = await sb.rpc("apply_customs", {
       p_company: row.company_id,
       p_direction: direction,
-      p_month: row.sales_month,
+      p_month: patch.sales_month ?? row.sales_month,
     });
     if (e2) throw new Error("Saved, but the customs details could not be matched: " + e2.message);
   }
+}
+
+/**
+ * Add an export sale / import purchase by hand, without uploading the month's report. Customs entries
+ * already held for the invoice number are matched to it.
+ */
+export async function addReconRow(
+  sb: Db,
+  direction: ReconDirection,
+  companyId: string,
+  month: string,
+  row: Omit<ExportReportEditable, "sales_month"> & { currency_type: string },
+  userId: string,
+): Promise<void> {
+  const { error } = await sb
+    .from(RECON_TABLE[direction])
+    .insert({ ...row, company_id: companyId, sales_month: month, created_by: userId });
+  if (error)
+    throw new Error(
+      /duplicate key|unique constraint/i.test(error.message)
+        ? `invoice ${row.invoice_no} is already in that month.`
+        : error.message,
+    );
+  const { error: e2 } = await sb.rpc("apply_customs", { p_company: companyId, p_direction: direction, p_month: month });
+  if (e2) throw new Error("Added, but the customs details could not be matched: " + e2.message);
+}
+
+/** Delete one export sale / import purchase. */
+export async function deleteReconRow(sb: Db, direction: ReconDirection, id: string): Promise<void> {
+  const { error } = await sb.from(RECON_TABLE[direction]).delete().eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 /** Re-read one export sale / import purchase after an inline edit. */

@@ -4,11 +4,20 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
 import CustomsUpload from "./CustomsUpload";
+import AddReconRow from "./AddReconRow";
+import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
 import { CustomsDocHeadings, DOC_FILTER_COLUMNS, docFilterValues, useCustomsDocs } from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
-import { RECON_TABLE, loadCustomsEntries, reloadRecon, updateCustomsEntry, updateReconReport } from "@/lib/data";
+import {
+  RECON_TABLE,
+  deleteReconRow,
+  loadCustomsEntries,
+  reloadRecon,
+  updateCustomsEntry,
+  updateReconReport,
+} from "@/lib/data";
 import { customsEntryMonth } from "@/lib/matchDocuments";
 import type {
   CurrencyType,
@@ -26,10 +35,15 @@ type Commit<T, K> = (target: T, field: K, kind: "text" | "num", places?: number)
 /** A customs declaration with no report row yet: its first item line, with the items' amounts summed. */
 interface OrphanRow {
   entry: CustomsEntry;
+  /** Every item line of the declaration. */
+  items: CustomsEntry[];
   customs_value: number | null;
   vat_base: number | null;
   vat_amount: number | null;
 }
+
+/** Amounts of a declaration summed over its item lines. */
+type OrphanTotal = "customs_value" | "vat_base" | "vat_amount";
 
 /** Report month key of a row. */
 const sm = (r: ExportSale) => monthKey(r.sales_month);
@@ -202,8 +216,9 @@ export default function ReconView({
         same.customs_value = add(same.customs_value, e.customs_value);
         same.vat_base = add(same.vat_base, e.vat_base);
         same.vat_amount = add(same.vat_amount, e.vat_amount);
+        same.items.push(e);
         if (e.item_no < same.entry.item_no) same.entry = e;
-      } else list.push({ entry: e, customs_value: e.customs_value, vat_base: e.vat_base, vat_amount: e.vat_amount });
+      } else list.push({ entry: e, items: [e], customs_value: e.customs_value, vat_base: e.vat_base, vat_amount: e.vat_amount });
       by.set(k, list);
     }
     // The placeholder rows answer to the same filter boxes.
@@ -335,6 +350,47 @@ export default function ReconView({
     const next = readEdit(v, kind, places, field === "cusdec_no" || field === "invoice_no");
     if (next !== undefined && next !== (entry[field] ?? null)) void updateEntry(entry, { [field]: next });
   };
+  /** Deletes a report row, after asking. */
+  async function remove(row: ExportSale) {
+    if (!window.confirm(`Delete invoice ${row.invoice_no} from ${mLabel(sm(row))}?`)) return;
+    setBusyId(row.id);
+    try {
+      await deleteReconRow(supabase, direction, row.id);
+      await reload();
+      flash(null);
+    } catch (e) {
+      flash("Could not delete: " + (e instanceof Error ? e.message : String(e)), true);
+    }
+    setBusyId(null);
+  }
+
+  /** Moves a report row to another report month. */
+  const moveMonth = (row: ExportSale, key: string) => {
+    if (key !== sm(row)) void updateReport(row, { sales_month: key + "-01" });
+  };
+
+  /**
+   * A summed amount of a declaration without a report invoice. With one item line the line takes the typed
+   * value; with several, the first line takes the typed total less the other lines, and blank clears them all.
+   */
+  async function updateTotal(o: OrphanRow, field: OrphanTotal, next: number | null) {
+    const first = o.entry;
+    const others = o.items.filter((i) => i.id !== first.id);
+    setBusyId(first.id);
+    try {
+      if (next == null) for (const i of o.items) await updateCustomsEntry(supabase, i, { [field]: null });
+      else await updateCustomsEntry(supabase, first, { [field]: cents(next - sum(others, (i) => i[field])) });
+      await reload();
+      flash(null);
+    } catch (e) {
+      flash("Could not save: " + (e instanceof Error ? e.message : String(e)), true);
+    }
+    setBusyId(null);
+  }
+  const commitTotal = (o: OrphanRow, field: OrphanTotal) => (v: string) => {
+    const next = readEdit(v, "num", 2, false) as number | null | undefined;
+    if (next !== undefined && next !== o[field]) void updateTotal(o, field, next);
+  };
 
   const Totals = ({ rows, label }: { rows: ExportSale[]; label: string }) => (
     <tr className="total">
@@ -368,6 +424,7 @@ export default function ReconView({
             }}
           />
           <CustomsUpload direction={direction} />
+          <BulkCustomsDocs direction={direction} entries={entries} onDone={() => setDocTick((n) => n + 1)} />
         </>
       )}
 
@@ -413,6 +470,21 @@ export default function ReconView({
           )}
         </span>
       </div>
+
+      {canWrite && (
+        <div className="bar">
+          <AddReconRow
+            direction={direction}
+            month={hi}
+            onAdded={(m) => {
+              if (m < lo || m > hi) {
+                setFrom(m);
+                setTo(m);
+              }
+            }}
+          />
+        </div>
+      )}
 
       {docs.input}
 
@@ -471,7 +543,7 @@ export default function ReconView({
                   ) : (
                     <>
                       No {t.noun} saved for {lo === hi ? mLabel(lo) : `${mLabel(lo)} to ${mLabel(hi)}`}.
-                      {canWrite ? ` Upload a month’s ${t.report} above.` : ""}
+                      {canWrite ? ` Upload a month’s ${t.report} above, or add invoices by hand.` : ""}
                     </>
                   )}
                 </td>
@@ -494,6 +566,10 @@ export default function ReconView({
                     update={update}
                     commitReport={commitReport}
                     commitEntry={commitEntry}
+                    commitTotal={commitTotal}
+                    months={months}
+                    moveMonth={moveMonth}
+                    remove={remove}
                     Totals={Totals}
                   />
                 ))}
@@ -504,14 +580,14 @@ export default function ReconView({
         </table>
       </div>
       <div className="note">
-        The first five columns come from the uploaded {t.report}. The customs columns are filled automatically from
+        The first five columns come from the uploaded {t.report}, or are entered by hand with “Add invoice by hand”. The customs columns are filled automatically from
         uploaded customs entries with the same invoice number, or entered by hand. A customs entry whose invoice is
         not in any uploaded {t.report} is listed under its CusDec month with the first columns blank until that
         month’s report is uploaded. Customs value is invoice value ×
         customs rate and exchange difference (1) is customs value less {isImport ? "ledger value" : "net sales"}.
         Re-uploading a month keeps customs details already held for the same invoice number.
         {isAdmin &&
-          ` Admins can correct the uploaded data with “Edit uploaded data”: the ${t.report} columns of each invoice, and the customs details of an entry without a ${isImport ? "purchase" : "sales"} invoice yet (correcting its invoice number matches it to the report). Re-uploading the month or the CusDec replaces the corrections.`}
+          ` Admins can correct the uploaded data with “Edit uploaded data”: every ${t.report} column of each invoice, its month included, and every customs column of an entry without a ${isImport ? "purchase" : "sales"} invoice yet (correcting its invoice number matches it to the report; a summed amount of a CusDec with several items is adjusted on its first item line). Re-uploading the month or the CusDec replaces the corrections.`}
       </div>
     </>
   );
@@ -531,6 +607,10 @@ function GroupRows({
   update,
   commitReport,
   commitEntry,
+  commitTotal,
+  months,
+  moveMonth,
+  remove,
   Totals,
 }: {
   g: { month: string; rows: ExportSale[] };
@@ -548,6 +628,11 @@ function GroupRows({
   update: (row: ExportSale, patch: Partial<ExportEditable>) => Promise<void>;
   commitReport: Commit<ExportSale, keyof ExportReportEditable>;
   commitEntry: Commit<CustomsEntry, keyof CustomsEditable>;
+  commitTotal: (o: OrphanRow, field: OrphanTotal) => (v: string) => void;
+  /** Report months of the tax year, for moving a row. */
+  months: string[];
+  moveMonth: (row: ExportSale, key: string) => void;
+  remove: (row: ExportSale) => void;
   Totals: (p: { rows: ExportSale[]; label: string }) => React.JSX.Element;
 }) {
   return (
@@ -590,8 +675,40 @@ function GroupRows({
         };
         return (
           <tr key={r.id} className={busy ? "opacity-60" : undefined}>
-            <td>{report("invoice_no", r.invoice_no, "text")}</td>
-            <td>{mLabel(sm(r))}</td>
+            <td>
+              {report("invoice_no", r.invoice_no, "text")}
+              {editing && (
+                <button
+                  type="button"
+                  className="btn ml-1"
+                  disabled={busy}
+                  aria-label={`Delete invoice ${r.invoice_no}`}
+                  title="Delete this invoice"
+                  onClick={() => remove(r)}
+                >
+                  ×
+                </button>
+              )}
+            </td>
+            <td>
+              {editing ? (
+                <select
+                  className="control"
+                  value={sm(r)}
+                  disabled={busy}
+                  aria-label={`Report month for ${r.invoice_no}`}
+                  onChange={(e) => moveMonth(r, e.target.value)}
+                >
+                  {(months.includes(sm(r)) ? months : [sm(r), ...months]).map((k) => (
+                    <option key={k} value={k}>
+                      {mLabel(k)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                mLabel(sm(r))
+              )}
+            </td>
             <td className="num">{report("amount_fc", fmt(r.amount_fc), "num")}</td>
             <td className="num">{report("ex_rate", r.ex_rate == null ? "" : String(r.ex_rate), "num", 6, "w-[100px]")}</td>
             <td className="num">{report("net_sales", fmt(r.net_sales), "num", 2, "w-[130px]")}</td>
@@ -636,8 +753,25 @@ function GroupRows({
           </tr>
         );
       })}
-      {extra.map(({ entry: e, customs_value, vat_base, vat_amount }) => {
+      {extra.map((o) => {
+        const { entry: e } = o;
         const busy = busyId === e.id;
+        /** An amount summed over the declaration's item lines: an input while an admin edits, else the sum. */
+        const totalCell = (field: OrphanTotal, width: string) => {
+          if (!editing) return fmt(o[field]);
+          const value = o[field] == null ? "" : String(o[field]);
+          return (
+            <CellInput
+              key={e.id + ":" + field + ":" + value}
+              value={value}
+              kind="num"
+              className={width}
+              disabled={busy}
+              label={`${field.replace(/_/g, " ")} for CusDec ${e.cusdec_no}`}
+              onCommit={commitTotal(o, field)}
+            />
+          );
+        };
         /** A declaration field of the customs entry: an input while an admin edits, else the shown value. */
         const entryCell = (field: keyof CustomsEditable, shown: ReactNode, kind: "text" | "num", places = 2, width = "w-[100px]") => {
           if (!editing) return shown;
@@ -670,9 +804,9 @@ function GroupRows({
             <td className="text-ink">{entryCell("currency_type", e.currency_type, "text", 2, "w-[70px]")}</td>
             <td className="num text-ink">{entryCell("ex_rate", e.ex_rate ?? "", "num", 6)}</td>
             <td className="num text-ink">{entryCell("invoice_value", fmt(e.invoice_value), "num", 2, "w-[110px]")}</td>
-            <td className="num text-ink">{fmt(customs_value)}</td>
-            {isImport && <td className="num text-ink">{fmt(vat_base)}</td>}
-            {isImport && <td className="num text-ink">{fmt(vat_amount)}</td>}
+            <td className="num text-ink">{totalCell("customs_value", "w-[130px]")}</td>
+            {isImport && <td className="num text-ink">{totalCell("vat_base", "w-[130px]")}</td>}
+            {isImport && <td className="num text-ink">{totalCell("vat_amount", "w-[120px]")}</td>}
             <td className="border-l border-line"></td>
             <td></td>
             <td></td>
