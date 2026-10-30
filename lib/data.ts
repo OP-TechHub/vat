@@ -3,6 +3,7 @@ import type {
   Company,
   CustomsEditable,
   CustomsEntry,
+  ExportEditable,
   ExportReportEditable,
   ExportSale,
   Invoice,
@@ -218,7 +219,7 @@ export async function addReconRow(
   direction: ReconDirection,
   companyId: string,
   month: string,
-  row: Omit<ExportReportEditable, "sales_month"> & { currency_type: string },
+  row: Omit<ExportReportEditable, "sales_month"> & { currency_type: string } & Partial<Omit<ExportEditable, "currency_type">>,
   userId: string,
 ): Promise<void> {
   const { error } = await sb

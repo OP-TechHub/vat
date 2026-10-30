@@ -12,6 +12,7 @@ import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./Co
 import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
 import {
   RECON_TABLE,
+  addReconRow,
   deleteReconRow,
   loadCustomsEntries,
   reloadRecon,
@@ -44,6 +45,9 @@ interface OrphanRow {
 
 /** Amounts of a declaration summed over its item lines. */
 type OrphanTotal = "customs_value" | "vat_base" | "vat_amount";
+
+/** Report and difference columns that a customs entry without a report invoice can be given. */
+type OrphanReport = "amount_fc" | "ex_rate" | "net_sales" | "short_shipment" | "sales_reversed";
 
 /** Report month key of a row. */
 const sm = (r: ExportSale) => monthKey(r.sales_month);
@@ -350,6 +354,42 @@ export default function ReconView({
     const next = readEdit(v, kind, places, field === "cusdec_no" || field === "invoice_no");
     if (next !== undefined && next !== (entry[field] ?? null)) void updateEntry(entry, { [field]: next });
   };
+  /**
+   * A value typed into a blank report or difference column of a customs entry without a report invoice:
+   * creates the report row for its invoice number in the CusDec month, which the customs entry then fills.
+   */
+  const commitNew = (o: OrphanRow, month: string, field: OrphanReport, kind: "text" | "num", places = 2) => (v: string) => {
+    const next = readEdit(v, kind, places, false);
+    if (next === undefined || next == null || !company) return;
+    const e = o.entry;
+    const cur = (e.currency_type ?? "").toUpperCase();
+    setBusyId(e.id);
+    void (async () => {
+      try {
+        await addReconRow(
+          supabase,
+          direction,
+          company.id,
+          month + "-01",
+          {
+            invoice_no: e.invoice_no,
+            amount_fc: 0,
+            ex_rate: null,
+            net_sales: 0,
+            currency_type: isImport ? cur || "USD" : CURRENCIES.includes(cur as CurrencyType) ? cur : "USD",
+            [field]: next,
+          },
+          user.id,
+        );
+        await reload();
+        flash(null);
+      } catch (err) {
+        flash("Could not save: " + (err instanceof Error ? err.message : String(err)), true);
+      }
+      setBusyId(null);
+    })();
+  };
+
   /** Deletes a report row, after asking. */
   async function remove(row: ExportSale) {
     if (!window.confirm(`Delete invoice ${row.invoice_no} from ${mLabel(sm(row))}?`)) return;
@@ -570,6 +610,7 @@ export default function ReconView({
                     months={months}
                     moveMonth={moveMonth}
                     remove={remove}
+                    commitNew={commitNew}
                     Totals={Totals}
                   />
                 ))}
@@ -583,7 +624,8 @@ export default function ReconView({
         The first five columns come from the uploaded {t.report}, or are entered by hand with “Add invoice by hand”. The customs columns are filled automatically from
         uploaded customs entries with the same invoice number, or entered by hand. A customs entry whose invoice is
         not in any uploaded {t.report} is listed under its CusDec month with the first columns blank until that
-        month’s report is uploaded. Customs value is invoice value ×
+        month’s report is uploaded; typing an amount, rate or net value in those blank columns adds the invoice to
+        the report by hand. Customs value is invoice value ×
         customs rate and exchange difference (1) is customs value less {isImport ? "ledger value" : "net sales"}.
         Re-uploading a month keeps customs details already held for the same invoice number.
         {isAdmin &&
@@ -611,6 +653,7 @@ function GroupRows({
   months,
   moveMonth,
   remove,
+  commitNew,
   Totals,
 }: {
   g: { month: string; rows: ExportSale[] };
@@ -633,6 +676,7 @@ function GroupRows({
   months: string[];
   moveMonth: (row: ExportSale, key: string) => void;
   remove: (row: ExportSale) => void;
+  commitNew: (o: OrphanRow, month: string, field: OrphanReport, kind: "text" | "num", places?: number) => (v: string) => void;
   Totals: (p: { rows: ExportSale[]; label: string }) => React.JSX.Element;
 }) {
   return (
@@ -756,6 +800,21 @@ function GroupRows({
       {extra.map((o) => {
         const { entry: e } = o;
         const busy = busyId === e.id;
+        /** A blank report or difference column: an input that creates the report row, else a dash. */
+        const newCell = (field: OrphanReport, places = 2, width = "w-[110px]") =>
+          canWrite ? (
+            <CellInput
+              key={e.id + ":" + field}
+              value=""
+              kind="num"
+              className={width}
+              disabled={busy}
+              label={`${field.replace(/_/g, " ")} for invoice ${e.invoice_no}`}
+              onCommit={commitNew(o, g.month, field, "num", places)}
+            />
+          ) : (
+            "—"
+          );
         /** An amount summed over the declaration's item lines: an input while an admin edits, else the sum. */
         const totalCell = (field: OrphanTotal, width: string) => {
           if (!editing) return fmt(o[field]);
@@ -795,9 +854,9 @@ function GroupRows({
               <span className="pill pill-warn">No {isImport ? "purchase" : "sales"} invoice yet</span>
             </td>
             <td>{mLabel(g.month)}</td>
-            <td className="num">—</td>
-            <td></td>
-            <td className="num">—</td>
+            <td className="num">{newCell("amount_fc")}</td>
+            <td className="num">{newCell("ex_rate", 6, "w-[100px]")}</td>
+            <td className="num">{newCell("net_sales", 2, "w-[130px]")}</td>
             <td className="border-l border-line text-ink">{entryCell("cusdec_no", e.cusdec_no, "text", 2, "w-[90px]")}</td>
             <td className="text-ink">{entryCell("cusdec_date", e.cusdec_date, "text")}</td>
             <td className="text-ink">{entryCell("cusdec_month", e.cusdec_month, "text", 2, "w-[90px]")}</td>
@@ -808,8 +867,8 @@ function GroupRows({
             {isImport && <td className="num text-ink">{totalCell("vat_base", "w-[130px]")}</td>}
             {isImport && <td className="num text-ink">{totalCell("vat_amount", "w-[120px]")}</td>}
             <td className="border-l border-line"></td>
-            <td></td>
-            <td></td>
+            <td className="num">{newCell("short_shipment")}</td>
+            <td className="num">{newCell("sales_reversed")}</td>
             <td className="wrapc">{entryCell("party", e.party, "text", 2, "w-[120px]")}</td>
             {docCell(e)}
           </tr>
