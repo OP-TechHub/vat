@@ -1,7 +1,9 @@
 import type { Db } from "./supabase/schema";
 import type {
   Company,
+  CustomsEditable,
   CustomsEntry,
+  ExportReportEditable,
   ExportSale,
   Invoice,
   IrdStatus,
@@ -137,6 +139,74 @@ export function loadCustomsEntries(sb: Db, direction: ReconDirection, companyId:
       .order("invoice_no")
       .range(a, b),
   );
+}
+
+/** Customs entry fields that belong to the declaration, so they are the same on every item line of it. */
+export const CUSTOMS_HEADER_FIELDS: readonly (keyof CustomsEditable)[] = [
+  "cusdec_no",
+  "cusdec_date",
+  "cusdec_month",
+  "invoice_no",
+  "currency_type",
+  "ex_rate",
+  "invoice_value",
+  "party",
+];
+
+/** Message for a failed save, worded for the unique keys of the uploaded tables. */
+function saveError(message: string): Error {
+  return new Error(
+    /duplicate key|unique constraint/i.test(message)
+      ? "another row already has that CusDec / invoice / item number."
+      : message,
+  );
+}
+
+/**
+ * Correct one field of a stored customs entry. Declaration fields (CUSTOMS_HEADER_FIELDS) are written to
+ * every item line of the same CusDec and invoice; item fields to the one line. The export sales / import
+ * purchases carrying the invoice number are then re-filled from the customs entries.
+ */
+export async function updateCustomsEntry(sb: Db, entry: CustomsEntry, patch: Partial<CustomsEditable>): Promise<void> {
+  const header = Object.keys(patch).some((k) => CUSTOMS_HEADER_FIELDS.includes(k as keyof CustomsEditable));
+  let q = sb.from("customs_entries").update(patch);
+  q = header
+    ? q
+        .eq("company_id", entry.company_id)
+        .eq("direction", entry.direction)
+        .eq("cusdec_no", entry.cusdec_no)
+        .eq("invoice_no", entry.invoice_no)
+    : q.eq("id", entry.id);
+  const { error } = await q;
+  if (error) throw saveError(error.message);
+  const { error: e2 } = await sb.rpc("apply_customs", { p_company: entry.company_id, p_direction: entry.direction });
+  if (e2) throw new Error("Saved, but the reconciliation could not be refreshed: " + e2.message);
+}
+
+/**
+ * Correct a field of an export sale / import purchase that came from the uploaded report. A changed invoice
+ * number is matched to the customs entries again.
+ */
+export async function updateReconReport(
+  sb: Db,
+  direction: ReconDirection,
+  row: ExportSale,
+  patch: Partial<ExportReportEditable>,
+  userId: string,
+): Promise<void> {
+  const { error } = await sb
+    .from(RECON_TABLE[direction])
+    .update({ ...patch, updated_by: userId, updated_at: new Date().toISOString() })
+    .eq("id", row.id);
+  if (error) throw saveError(error.message);
+  if ("invoice_no" in patch) {
+    const { error: e2 } = await sb.rpc("apply_customs", {
+      p_company: row.company_id,
+      p_direction: direction,
+      p_month: row.sales_month,
+    });
+    if (e2) throw new Error("Saved, but the customs details could not be matched: " + e2.message);
+  }
 }
 
 /** Re-read one export sale / import purchase after an inline edit. */

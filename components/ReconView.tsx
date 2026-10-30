@@ -1,22 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
 import CustomsUpload from "./CustomsUpload";
-import { DocActions, DocHeading } from "./DocActions";
+import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
+import { CustomsDocHeadings, DOC_FILTER_COLUMNS, docFilterValues, useCustomsDocs } from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
-import { RECON_TABLE, loadCustomsEntries, reloadRecon } from "@/lib/data";
-import { cusdecDocumentUrl, removeCusdecDocument, uploadCusdecDocument } from "@/lib/customsDocs";
+import { RECON_TABLE, loadCustomsEntries, reloadRecon, updateCustomsEntry, updateReconReport } from "@/lib/data";
 import { customsEntryMonth } from "@/lib/matchDocuments";
-import type { CurrencyType, CustomsEntry, ExportEditable, ExportSale, ReconDirection } from "@/lib/types";
+import type {
+  CurrencyType,
+  CustomsEditable,
+  CustomsEntry,
+  ExportEditable,
+  ExportReportEditable,
+  ExportSale,
+  ReconDirection,
+} from "@/lib/types";
 
-/** What the CusDec column's action buttons work on. */
-interface CusdecDoc {
-  filename: string;
-  entry: CustomsEntry;
-}
+/** Commit handler factory for an admin-editable field of the uploaded data. */
+type Commit<T, K> = (target: T, field: K, kind: "text" | "num", places?: number) => (v: string) => void;
 
 /** A customs declaration with no report row yet: its first item line, with the items' amounts summed. */
 interface OrphanRow {
@@ -73,16 +78,19 @@ export default function ReconView({
   /** Called with the re-read row after an inline edit. */
   onPatched: (row: ExportSale) => void;
 }) {
-  const { supabase, company, months, loading, canWrite, user, flash } = useApp();
+  const { supabase, company, months, loading, canWrite, isAdmin, user, reload, flash } = useApp();
   const isImport = direction === "import";
   const t = TEXT[direction];
   const customsCols = isImport ? 9 : 7;
-  const COLS = 10 + customsCols;
+  const COLS = 12 + customsCols;
 
   const [upMonth, setUpMonth] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Admins may correct the uploaded report columns and the customs entries without a report invoice.
+  const [editOn, setEditOn] = useState(false);
+  const editing = isAdmin && editOn;
 
   const countFor = (m: string) => rows0.filter((r) => sm(r) === m).length;
 
@@ -139,7 +147,7 @@ export default function ReconView({
       { key: "short_shipment", label: "Short shipment", num: true, className: "num" },
       { key: "sales_reversed", label: "Reversed in the month", num: true, className: "num" },
       { key: "updated_in_custom_report", label: "Updated in customs report" },
-      { key: "doc", label: "CusDec (held / none)", className: "border-l border-line" },
+      ...DOC_FILTER_COLUMNS,
     ],
     [isImport, t],
   );
@@ -168,70 +176,16 @@ export default function ReconView({
           short_shipment: r.short_shipment,
           sales_reversed: r.sales_reversed,
           updated_in_custom_report: r.updated_in_custom_report,
-          doc: e ? (e.doc_path ? "Held" : "None") : "",
+          ...docFilterValues(e),
         };
       }),
     [rows0, entryByInvoice, cf.apply],
   );
 
-  // CusDec document actions (Open / Upload / Replace / Remove) on the stored customs entry.
-  const [docBusy, setDocBusy] = useState<string | null>(null);
-  const docFileRef = useRef<HTMLInputElement>(null);
-  const docTarget = useRef<CustomsEntry | null>(null);
-  async function onDocFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    const entry = docTarget.current;
-    e.target.value = "";
-    if (!file || !entry || !company) return;
-    setDocBusy(entry.id);
-    try {
-      await uploadCusdecDocument(supabase, company.id, direction, entry, file, entry.doc_path);
-      flash(`CusDec ${entry.cusdec_no} file kept.`);
-      setDocTick((n) => n + 1);
-    } catch (err) {
-      flash("Could not upload: " + (err instanceof Error ? err.message : String(err)), true);
-    }
-    setDocBusy(null);
-  }
-  async function openDoc(d: CusdecDoc) {
-    try {
-      window.open(await cusdecDocumentUrl(supabase, d.entry.doc_path!), "_blank", "noopener");
-    } catch (err) {
-      flash("Could not open the file: " + (err instanceof Error ? err.message : String(err)), true);
-    }
-  }
-  async function removeDoc(d: CusdecDoc) {
-    if (!window.confirm(`Remove the CusDec file for ${d.entry.cusdec_no} (${d.filename})?`)) return;
-    setDocBusy(d.entry.id);
-    try {
-      await removeCusdecDocument(supabase, d.entry);
-      flash(`CusDec ${d.entry.cusdec_no} file removed.`);
-      setDocTick((n) => n + 1);
-    } catch (err) {
-      flash("Could not remove: " + (err instanceof Error ? err.message : String(err)), true);
-    }
-    setDocBusy(null);
-  }
-  /** The CusDec cell for a row: nothing without a customs entry, else the document actions. */
-  const docCell = (entry: CustomsEntry | null | undefined): ReactNode =>
-    entry ? (
-      <DocActions<CusdecDoc>
-        doc={entry.doc_path ? { filename: entry.doc_name ?? entry.cusdec_no, entry } : null}
-        canWrite={canWrite}
-        busy={docBusy === entry.id}
-        yes="Held"
-        no="None"
-        pillClass="pill-info"
-        onOpen={(d) => void openDoc(d)}
-        onPick={() => {
-          docTarget.current = entry;
-          docFileRef.current?.click();
-        }}
-        onRemove={(d) => void removeDoc(d)}
-      />
-    ) : (
-      <span className="text-muted">—</span>
-    );
+  // CusDec, other documents and all documents of the customs entry carrying the row's invoice number.
+  const docs = useCustomsDocs(direction, () => setDocTick((n) => n + 1));
+  /** The three document cells for a row: dashes without a customs entry, else the document actions. */
+  const docCell = docs.cells;
 
   /** Entries whose invoice number matches no loaded row, by CusDec month, one row per declaration with its items summed. */
   const orphans = useMemo(() => {
@@ -269,7 +223,7 @@ export default function ReconView({
           custom_vat_base: o.vat_base,
           custom_vat_amount: o.vat_amount,
           updated_in_custom_report: o.entry.party,
-          doc: o.entry.doc_path ? "Held" : "None",
+          ...docFilterValues(o.entry),
         })),
       );
     return by;
@@ -331,15 +285,55 @@ export default function ReconView({
     if (next !== (row[field] ?? null)) void update(row, { [field]: next });
   };
   const numeric = (row: ExportSale, field: keyof ExportEditable, places = 2) => (v: string) => {
-    const s = v.replace(/,/g, "").trim();
-    const n = s === "" ? null : Number(s);
-    if (n != null && isNaN(n)) {
+    const next = parseCellNumber(v, places);
+    if (next === undefined) {
       flash(`“${v}” is not a number.`, true);
       return;
     }
-    const p = 10 ** places;
-    const next = n == null ? null : Math.round(n * p) / p;
     if (next !== (row[field] ?? null)) void update(row, { [field]: next });
+  };
+
+  /** Reads an admin's edit of the uploaded data: undefined (with a message) when it cannot be saved. */
+  function readEdit(v: string, kind: "text" | "num", places: number, required: boolean): string | number | null | undefined {
+    const next = kind === "text" ? v.trim() || null : parseCellNumber(v, places);
+    if (next === undefined) flash(`“${v}” is not a number.`, true);
+    else if (next == null && required) flash("This field cannot be blank.", true);
+    else return next;
+    return undefined;
+  }
+
+  // Report columns of a row (invoice number, amount, rate, net value), as uploaded.
+  async function updateReport(row: ExportSale, patchData: Partial<ExportReportEditable>) {
+    setBusyId(row.id);
+    try {
+      await updateReconReport(supabase, direction, row, patchData, user.id);
+      patch(await reloadRecon(supabase, direction, row.id));
+      flash(null);
+    } catch (e) {
+      flash("Could not save: " + (e instanceof Error ? e.message : String(e)), true);
+    }
+    setBusyId(null);
+  }
+  const commitReport: Commit<ExportSale, keyof ExportReportEditable> = (row, field, kind, places = 2) => (v) => {
+    const next = readEdit(v, kind, places, field !== "ex_rate");
+    if (next !== undefined && next !== (row[field] ?? null)) void updateReport(row, { [field]: next });
+  };
+
+  // Customs entries without a report invoice: their declaration fields, saved to every item line.
+  async function updateEntry(entry: CustomsEntry, patchData: Partial<CustomsEditable>) {
+    setBusyId(entry.id);
+    try {
+      await updateCustomsEntry(supabase, entry, patchData);
+      await reload();
+      flash(null);
+    } catch (e) {
+      flash("Could not save: " + (e instanceof Error ? e.message : String(e)), true);
+    }
+    setBusyId(null);
+  }
+  const commitEntry: Commit<CustomsEntry, keyof CustomsEditable> = (entry, field, kind, places = 2) => (v) => {
+    const next = readEdit(v, kind, places, field === "cusdec_no" || field === "invoice_no");
+    if (next !== undefined && next !== (entry[field] ?? null)) void updateEntry(entry, { [field]: next });
   };
 
   const Totals = ({ rows, label }: { rows: ExportSale[]; label: string }) => (
@@ -355,8 +349,7 @@ export default function ReconView({
       <td className="num">{fmt(sum(rows, (r) => exchangeDifference(r) ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.short_shipment ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.sales_reversed ?? 0))}</td>
-      <td></td>
-      <td></td>
+      <td colSpan={4}></td>
     </tr>
   );
 
@@ -402,6 +395,7 @@ export default function ReconView({
           </select>
         </label>
         <ClearFilters state={cf} />
+        {isAdmin && <EditSwitch on={editOn} onChange={setEditOn} />}
         <span className="note pb-1.5">
           {all.length} {t.invoiceNoun} · {isImport ? "ledger value" : "net sales"}{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.net_sales))}</span>
@@ -420,7 +414,7 @@ export default function ReconView({
         </span>
       </div>
 
-      <input ref={docFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => void onDocFile(e)} />
+      {docs.input}
 
       <div className="scroll">
         <table className="tbl">
@@ -435,8 +429,8 @@ export default function ReconView({
               <th colSpan={4} className="text-center border-l border-line" style={{ position: "static" }}>
                 Differences
               </th>
-              <th className="text-center border-l border-line" style={{ position: "static" }}>
-                Document
+              <th colSpan={3} className="text-center border-l border-line" style={{ position: "static" }}>
+                Documents
               </th>
             </tr>
             <tr>
@@ -458,7 +452,7 @@ export default function ReconView({
               <th className="num">Short shipment (3)</th>
               <th className="num">{isImport ? "Reversed in the month (4)" : "Sales reversed in the month (4)"}</th>
               <th>Updated in customs report</th>
-              <DocHeading title="CusDec" canWrite={canWrite} className="border-l border-line" />
+              <CustomsDocHeadings canWrite={canWrite} />
             </tr>
             <FilterRow state={cf} />
           </thead>
@@ -493,10 +487,13 @@ export default function ReconView({
                     entryFor={(inv) => entryByInvoice.get(norm(inv))}
                     isImport={isImport}
                     canWrite={canWrite}
+                    editing={editing}
                     busyId={busyId}
                     text={text}
                     numeric={numeric}
                     update={update}
+                    commitReport={commitReport}
+                    commitEntry={commitEntry}
                     Totals={Totals}
                   />
                 ))}
@@ -513,6 +510,8 @@ export default function ReconView({
         month’s report is uploaded. Customs value is invoice value ×
         customs rate and exchange difference (1) is customs value less {isImport ? "ledger value" : "net sales"}.
         Re-uploading a month keeps customs details already held for the same invoice number.
+        {isAdmin &&
+          ` Admins can correct the uploaded data with “Edit uploaded data”: the ${t.report} columns of each invoice, and the customs details of an entry without a ${isImport ? "purchase" : "sales"} invoice yet (correcting its invoice number matches it to the report). Re-uploading the month or the CusDec replaces the corrections.`}
       </div>
     </>
   );
@@ -525,10 +524,13 @@ function GroupRows({
   entryFor,
   isImport,
   canWrite,
+  editing,
   busyId,
   text,
   numeric,
   update,
+  commitReport,
+  commitEntry,
   Totals,
 }: {
   g: { month: string; rows: ExportSale[] };
@@ -538,10 +540,14 @@ function GroupRows({
   entryFor: (invoiceNo: string) => CustomsEntry | undefined;
   isImport: boolean;
   canWrite: boolean;
+  /** An admin is correcting the uploaded data. */
+  editing: boolean;
   busyId: string | null;
   text: (row: ExportSale, field: keyof ExportEditable) => (v: string) => void;
   numeric: (row: ExportSale, field: keyof ExportEditable, places?: number) => (v: string) => void;
   update: (row: ExportSale, patch: Partial<ExportEditable>) => Promise<void>;
+  commitReport: Commit<ExportSale, keyof ExportReportEditable>;
+  commitEntry: Commit<CustomsEntry, keyof CustomsEditable>;
   Totals: (p: { rows: ExportSale[]; label: string }) => React.JSX.Element;
 }) {
   return (
@@ -566,13 +572,29 @@ function GroupRows({
             />
           );
         };
+        /** A report column: an input while an admin edits, else the shown value. */
+        const report = (field: keyof ExportReportEditable, shown: ReactNode, kind: "text" | "num", places = 2, width = "w-[110px]") => {
+          if (!editing) return shown;
+          const value = r[field] == null ? "" : String(r[field]);
+          return (
+            <CellInput
+              key={r.id + ":" + field + ":" + value}
+              value={value}
+              kind={kind}
+              className={width}
+              disabled={busy}
+              label={`${field.replace(/_/g, " ")} for ${r.invoice_no}`}
+              onCommit={commitReport(r, field, kind, places)}
+            />
+          );
+        };
         return (
           <tr key={r.id} className={busy ? "opacity-60" : undefined}>
-            <td>{r.invoice_no}</td>
+            <td>{report("invoice_no", r.invoice_no, "text")}</td>
             <td>{mLabel(sm(r))}</td>
-            <td className="num">{fmt(r.amount_fc)}</td>
-            <td className="num">{r.ex_rate == null ? "" : String(r.ex_rate)}</td>
-            <td className="num">{fmt(r.net_sales)}</td>
+            <td className="num">{report("amount_fc", fmt(r.amount_fc), "num")}</td>
+            <td className="num">{report("ex_rate", r.ex_rate == null ? "" : String(r.ex_rate), "num", 6, "w-[100px]")}</td>
+            <td className="num">{report("net_sales", fmt(r.net_sales), "num", 2, "w-[130px]")}</td>
             <td className="border-l border-line">{cell("cusdec_no", "text", 0, "w-[90px]")}</td>
             <td>{cell("cusdec_date", "text", 0, "w-[100px]")}</td>
             <td>{cell("cusdec_month", "text", 0, "w-[90px]")}</td>
@@ -610,72 +632,57 @@ function GroupRows({
             <td className="num">{cell("short_shipment", "num")}</td>
             <td className="num">{cell("sales_reversed", "num")}</td>
             <td>{cell("updated_in_custom_report", "text", 0, "w-[120px]")}</td>
-            <td className="border-l border-line">{docCell(entryFor(r.invoice_no))}</td>
+            {docCell(entryFor(r.invoice_no))}
           </tr>
         );
       })}
-      {extra.map(({ entry: e, customs_value, vat_base, vat_amount }) => (
-        <tr key={"e" + e.id} className="text-muted">
-          <td>
-            {e.invoice_no}{" "}
-            <span className="pill pill-warn">No {isImport ? "purchase" : "sales"} invoice yet</span>
-          </td>
-          <td>{mLabel(g.month)}</td>
-          <td className="num">—</td>
-          <td></td>
-          <td className="num">—</td>
-          <td className="border-l border-line text-ink">{e.cusdec_no}</td>
-          <td className="text-ink">{e.cusdec_date}</td>
-          <td className="text-ink">{e.cusdec_month}</td>
-          <td className="text-ink">{e.currency_type}</td>
-          <td className="num text-ink">{e.ex_rate ?? ""}</td>
-          <td className="num text-ink">{fmt(e.invoice_value)}</td>
-          <td className="num text-ink">{fmt(customs_value)}</td>
-          {isImport && <td className="num text-ink">{fmt(vat_base)}</td>}
-          {isImport && <td className="num text-ink">{fmt(vat_amount)}</td>}
-          <td className="border-l border-line"></td>
-          <td></td>
-          <td></td>
-          <td className="wrapc">{e.party}</td>
-          <td className="border-l border-line">{docCell(e)}</td>
-        </tr>
-      ))}
+      {extra.map(({ entry: e, customs_value, vat_base, vat_amount }) => {
+        const busy = busyId === e.id;
+        /** A declaration field of the customs entry: an input while an admin edits, else the shown value. */
+        const entryCell = (field: keyof CustomsEditable, shown: ReactNode, kind: "text" | "num", places = 2, width = "w-[100px]") => {
+          if (!editing) return shown;
+          const value = e[field] == null ? "" : String(e[field]);
+          return (
+            <CellInput
+              key={e.id + ":" + field + ":" + value}
+              value={value}
+              kind={kind}
+              className={width}
+              disabled={busy}
+              label={`${field.replace(/_/g, " ")} for CusDec ${e.cusdec_no}`}
+              onCommit={commitEntry(e, field, kind, places)}
+            />
+          );
+        };
+        return (
+          <tr key={"e" + e.id} className={"text-muted" + (busy ? " opacity-60" : "")}>
+            <td>
+              {entryCell("invoice_no", e.invoice_no, "text")}{" "}
+              <span className="pill pill-warn">No {isImport ? "purchase" : "sales"} invoice yet</span>
+            </td>
+            <td>{mLabel(g.month)}</td>
+            <td className="num">—</td>
+            <td></td>
+            <td className="num">—</td>
+            <td className="border-l border-line text-ink">{entryCell("cusdec_no", e.cusdec_no, "text", 2, "w-[90px]")}</td>
+            <td className="text-ink">{entryCell("cusdec_date", e.cusdec_date, "text")}</td>
+            <td className="text-ink">{entryCell("cusdec_month", e.cusdec_month, "text", 2, "w-[90px]")}</td>
+            <td className="text-ink">{entryCell("currency_type", e.currency_type, "text", 2, "w-[70px]")}</td>
+            <td className="num text-ink">{entryCell("ex_rate", e.ex_rate ?? "", "num", 6)}</td>
+            <td className="num text-ink">{entryCell("invoice_value", fmt(e.invoice_value), "num", 2, "w-[110px]")}</td>
+            <td className="num text-ink">{fmt(customs_value)}</td>
+            {isImport && <td className="num text-ink">{fmt(vat_base)}</td>}
+            {isImport && <td className="num text-ink">{fmt(vat_amount)}</td>}
+            <td className="border-l border-line"></td>
+            <td></td>
+            <td></td>
+            <td className="wrapc">{entryCell("party", e.party, "text", 2, "w-[120px]")}</td>
+            {docCell(e)}
+          </tr>
+        );
+      })}
       <Totals rows={g.rows} label={mLabel(g.month)} />
     </>
   );
 }
 
-/** Text or number box that saves on blur or Enter and restores the saved value on Escape. */
-function CellInput({
-  value,
-  kind,
-  className,
-  disabled,
-  label,
-  onCommit,
-}: {
-  value: string;
-  kind: "text" | "num";
-  className?: string;
-  disabled: boolean;
-  label: string;
-  onCommit: (v: string) => void;
-}) {
-  const [draft, setDraft] = useState(value);
-  return (
-    <input
-      className={"control " + (kind === "num" ? "text-right font-mono tabular-nums " : "") + (className ?? "")}
-      type="text"
-      inputMode={kind === "num" ? "decimal" : undefined}
-      value={draft}
-      disabled={disabled}
-      aria-label={label}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onCommit(draft)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        if (e.key === "Escape") setDraft(value);
-      }}
-    />
-  );
-}

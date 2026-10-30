@@ -1,20 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useApp } from "./AppShell";
 import CustomsUpload from "./CustomsUpload";
-import { DocActions, DocHeading } from "./DocActions";
+import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
+import { CustomsDocHeadings, DOC_FILTER_COLUMNS, docFilterValues, useCustomsDocs } from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, sum } from "@/lib/format";
-import { cusdecDocumentUrl, removeCusdecDocument, uploadCusdecDocument } from "@/lib/customsDocs";
 import { customsEntryMonth } from "@/lib/matchDocuments";
-import type { CustomsEntry } from "@/lib/types";
-
-/** What the CusDec column's action buttons work on. */
-interface CusdecDoc {
-  filename: string;
-  entry: CustomsEntry;
-}
+import { CUSTOMS_HEADER_FIELDS, updateCustomsEntry } from "@/lib/data";
+import type { CustomsEditable, CustomsEntry } from "@/lib/types";
 
 const UNDATED = "undated";
 
@@ -44,10 +39,10 @@ const COLUMNS: ColumnSpec[] = [
   { key: "vat_amount", label: "VAT", num: true, className: "num" },
   { key: "vat_type", label: "VAT type" },
   { key: "vat_code", label: "VAT code" },
-  { key: "doc", label: "CusDec (held / none)", className: "border-l border-line" },
+  ...DOC_FILTER_COLUMNS,
 ];
 /** Columns of the register table, for the empty / loading rows. */
-const COLS = 25;
+const COLS = 27;
 
 /** Quantity with up to three decimals, without trailing zeros. */
 const qty = (n: number | null | undefined) =>
@@ -59,8 +54,15 @@ const qty = (n: number | null | undefined) =>
  * from the CusDec PDF / spreadsheet upload above the table.
  */
 export default function ImportsView() {
-  const { supabase, company, months, data, loading, canWrite, reload, flash } = useApp();
+  const { supabase, company, months, data, loading, canWrite, isAdmin, reload, flash } = useApp();
+  // CusDec, other documents and all documents of each declaration, shared by its item lines.
+  const docs = useCustomsDocs("import", reload);
   const entries = data.importEntries;
+
+  // Admins may correct the uploaded data in place; the switch keeps the register read-only otherwise.
+  const [editOn, setEditOn] = useState(false);
+  const editing = isAdmin && editOn;
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -72,7 +74,7 @@ export default function ImportsView() {
     const sorted = [...entries].sort(
       (a, b) => a.cusdec_no.localeCompare(b.cusdec_no) || a.invoice_no.localeCompare(b.invoice_no) || a.item_no - b.item_no,
     );
-    const shown = cf.apply(sorted, (e) => ({ ...e, doc: e.doc_path ? "Held" : "None" }));
+    const shown = cf.apply(sorted, (e) => ({ ...e, ...docFilterValues(e) }));
     for (const e of shown) {
       const k = customsEntryMonth(e) ?? UNDATED;
       m.set(k, [...(m.get(k) ?? []), e]);
@@ -106,95 +108,97 @@ export default function ImportsView() {
   const all = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   const cusdecs = (rows: CustomsEntry[]) => new Set(rows.map((r) => r.cusdec_no + "|" + r.invoice_no)).size;
 
-  // CusDec document actions (Open / Upload / Replace / Remove) on the stored customs entry; the file
-  // is shared by every item line of the declaration.
-  const [docBusy, setDocBusy] = useState<string | null>(null);
-  const docFileRef = useRef<HTMLInputElement>(null);
-  const docTarget = useRef<CustomsEntry | null>(null);
-  async function onDocFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    const entry = docTarget.current;
-    e.target.value = "";
-    if (!file || !entry || !company) return;
-    setDocBusy(entry.id);
+  async function save(e: CustomsEntry, patch: Partial<CustomsEditable>) {
+    setSavingId(e.id);
     try {
-      await uploadCusdecDocument(supabase, company.id, "import", entry, file, entry.doc_path);
-      flash(`CusDec ${entry.cusdec_no} file kept.`);
+      await updateCustomsEntry(supabase, e, patch);
       await reload();
+      flash(null);
     } catch (err) {
-      flash("Could not upload: " + (err instanceof Error ? err.message : String(err)), true);
+      flash("Could not save: " + (err instanceof Error ? err.message : String(err)), true);
     }
-    setDocBusy(null);
+    setSavingId(null);
   }
-  async function openDoc(d: CusdecDoc) {
-    try {
-      window.open(await cusdecDocumentUrl(supabase, d.entry.doc_path!), "_blank", "noopener");
-    } catch (err) {
-      flash("Could not open the file: " + (err instanceof Error ? err.message : String(err)), true);
+  /** Commit handler for one field: blank clears it, except on the CusDec, invoice and item numbers. */
+  const commit = (e: CustomsEntry, field: keyof CustomsEditable, kind: "text" | "int" | "num", places: number) => (v: string) => {
+    let next: string | number | null;
+    if (kind === "text") next = v.trim() || null;
+    else {
+      const n = parseCellNumber(v, kind === "int" ? 0 : places);
+      if (n === undefined || (kind === "int" && n != null && n < 1)) {
+        flash(`“${v}” is not ${kind === "int" ? "an item number" : "a number"}.`, true);
+        return;
+      }
+      next = n;
     }
-  }
-  async function removeDoc(d: CusdecDoc) {
-    if (!window.confirm(`Remove the CusDec file for ${d.entry.cusdec_no} (${d.filename})?`)) return;
-    setDocBusy(d.entry.id);
-    try {
-      await removeCusdecDocument(supabase, d.entry);
-      flash(`CusDec ${d.entry.cusdec_no} file removed.`);
-      await reload();
-    } catch (err) {
-      flash("Could not remove: " + (err instanceof Error ? err.message : String(err)), true);
+    if (next === (e[field] ?? null)) return;
+    if (next == null && (field === "cusdec_no" || field === "invoice_no" || field === "item_no")) {
+      flash("The CusDec, invoice and item numbers cannot be blank.", true);
+      return;
     }
-    setDocBusy(null);
-  }
+    void save(e, { [field]: next });
+  };
 
   const sameDoc = (a: CustomsEntry, b: CustomsEntry | undefined) =>
     !!b && a.cusdec_no === b.cusdec_no && a.invoice_no === b.invoice_no;
   const Row = ({ e, prev }: { e: CustomsEntry; prev?: CustomsEntry }) => {
-    const busy = docBusy === e.id;
+    const busy = docs.busyId === e.id || savingId === e.id;
     // Header fields print on the first item line of a declaration only; later items repeat them muted.
     const first = !sameDoc(e, prev);
     const hdr = first ? "" : "text-muted";
+    /**
+     * A field's cell: an input while an admin edits (declaration fields on the first item line only, as they
+     * are saved to every line of the CusDec), else the shown value.
+     */
+    const cell = (
+      field: keyof CustomsEditable,
+      shown: ReactNode,
+      kind: "text" | "int" | "num" = "text",
+      places = 2,
+      width = "w-[100px]",
+    ) => {
+      if (!editing || (!first && CUSTOMS_HEADER_FIELDS.includes(field))) return shown;
+      const raw = e[field];
+      const value = raw == null ? "" : String(raw);
+      return (
+        <CellInput
+          key={e.id + ":" + field + ":" + value}
+          value={value}
+          kind={kind === "text" ? "text" : "num"}
+          className={width}
+          disabled={busy}
+          label={`${field.replace(/_/g, " ")} for CusDec ${e.cusdec_no} item ${e.item_no}`}
+          onCommit={commit(e, field, kind, places)}
+        />
+      );
+    };
     return (
       <tr className={busy ? "opacity-60" : undefined}>
-        <td className={hdr}>{e.cusdec_no}</td>
-        <td className={hdr}>{e.cusdec_date ?? ""}</td>
-        <td className={hdr}>{e.cusdec_month ?? ""}</td>
-        <td className={hdr}>{e.invoice_no}</td>
-        <td className="num border-l border-line">{e.item_no}</td>
-        <td>{e.hs_code ?? ""}</td>
-        <td className="wrapc">{e.description ?? ""}</td>
-        <td className={"wrapc " + hdr}>{e.party ?? ""}</td>
-        <td>{e.uom ?? ""}</td>
-        <td className="num">{qty(e.quantity)}</td>
-        <td className={"border-l border-line " + hdr}>{e.currency_type ?? ""}</td>
-        <td className={"num " + hdr}>{e.ex_rate == null ? "" : String(e.ex_rate)}</td>
-        <td className={"num " + hdr}>{fmt(e.invoice_value)}</td>
-        <td className="num">{fmt(e.customs_value)}</td>
-        <td className="num border-l border-line">{fmt(e.cid_amount)}</td>
-        <td className="text-center">{e.cid_code ?? ""}</td>
-        <td className="num">{fmt(e.pal_amount)}</td>
-        <td className="text-center">{e.pal_code ?? ""}</td>
-        <td className="num">{fmt(e.sscl_amount)}</td>
-        <td className="text-center">{e.sscl_code ?? ""}</td>
-        <td className="num">{fmt(e.vat_base)}</td>
-        <td className="num">{fmt(e.vat_amount)}</td>
-        <td className="text-center">{e.vat_type ?? ""}</td>
-        <td className="text-center">{e.vat_code ?? ""}</td>
-        <td className="border-l border-line">
-          <DocActions<CusdecDoc>
-            doc={e.doc_path ? { filename: e.doc_name ?? e.cusdec_no, entry: e } : null}
-            canWrite={canWrite}
-            busy={busy}
-            yes="Held"
-            no="None"
-            pillClass="pill-info"
-            onOpen={(d) => void openDoc(d)}
-            onPick={() => {
-              docTarget.current = e;
-              docFileRef.current?.click();
-            }}
-            onRemove={(d) => void removeDoc(d)}
-          />
-        </td>
+        <td className={hdr}>{cell("cusdec_no", e.cusdec_no)}</td>
+        <td className={hdr}>{cell("cusdec_date", e.cusdec_date ?? "")}</td>
+        <td className={hdr}>{cell("cusdec_month", e.cusdec_month ?? "", "text", 0, "w-[90px]")}</td>
+        <td className={hdr}>{cell("invoice_no", e.invoice_no)}</td>
+        <td className="num border-l border-line">{cell("item_no", e.item_no, "int", 0, "w-[60px]")}</td>
+        <td>{cell("hs_code", e.hs_code ?? "")}</td>
+        <td className="wrapc">{cell("description", e.description ?? "", "text", 0, "w-[200px]")}</td>
+        <td className={"wrapc " + hdr}>{cell("party", e.party ?? "", "text", 0, "w-[160px]")}</td>
+        <td>{cell("uom", e.uom ?? "", "text", 0, "w-[60px]")}</td>
+        <td className="num">{cell("quantity", qty(e.quantity), "num", 3)}</td>
+        <td className={"border-l border-line " + hdr}>{cell("currency_type", e.currency_type ?? "", "text", 0, "w-[60px]")}</td>
+        <td className={"num " + hdr}>{cell("ex_rate", e.ex_rate == null ? "" : String(e.ex_rate), "num", 6)}</td>
+        <td className={"num " + hdr}>{cell("invoice_value", fmt(e.invoice_value), "num", 2, "w-[120px]")}</td>
+        <td className="num">{cell("customs_value", fmt(e.customs_value), "num", 2, "w-[120px]")}</td>
+        <td className="num border-l border-line">{cell("cid_amount", fmt(e.cid_amount), "num")}</td>
+        <td className="text-center">{cell("cid_code", e.cid_code ?? "", "text", 0, "w-[60px]")}</td>
+        <td className="num">{cell("pal_amount", fmt(e.pal_amount), "num")}</td>
+        <td className="text-center">{cell("pal_code", e.pal_code ?? "", "text", 0, "w-[60px]")}</td>
+        <td className="num">{cell("sscl_amount", fmt(e.sscl_amount), "num")}</td>
+        <td className="text-center">{cell("sscl_code", e.sscl_code ?? "", "text", 0, "w-[60px]")}</td>
+        <td className="num">{cell("vat_base", fmt(e.vat_base), "num", 2, "w-[120px]")}</td>
+        <td className="num">{cell("vat_amount", fmt(e.vat_amount), "num", 2, "w-[110px]")}</td>
+        <td className="text-center">{cell("vat_type", e.vat_type ?? "", "text", 0, "w-[60px]")}</td>
+        <td className="text-center">{cell("vat_code", e.vat_code ?? "", "text", 0, "w-[60px]")}</td>
+        {docs.cells(e)}
       </tr>
     );
   };
@@ -212,7 +216,7 @@ export default function ImportsView() {
       <td></td>
       <td className="num">{fmt(sum(rows, (r) => r.vat_base ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.vat_amount ?? 0))}</td>
-      <td colSpan={3}></td>
+      <td colSpan={5}></td>
     </tr>
   );
 
@@ -244,13 +248,15 @@ export default function ImportsView() {
           </select>
         </label>
         <ClearFilters state={cf} />
+        {isAdmin && <EditSwitch on={editOn} onChange={setEditOn} />}
         <span className="note pb-1.5">
           {cusdecs(all)} CusDec{cusdecs(all) === 1 ? "" : "s"}, {all.length} item line{all.length === 1 ? "" : "s"} · value for VAT{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.vat_base ?? 0))}</span>
           {" · "}VAT as per customs{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.vat_amount ?? 0))}</span>
           {" · "}
-          {all.filter((r) => r.doc_path).length} line{all.filter((r) => r.doc_path).length === 1 ? "" : "s"} with the CusDec file held
+          {cusdecs(all.filter((r) => r.doc_path))} with the CusDec held · {cusdecs(all.filter((r) => r.other_doc_path))} with other
+          documents · {cusdecs(all.filter((r) => r.all_doc_path))} with all documents
           {undated.length > 0 && (
             <>
               {" · "}
@@ -262,7 +268,7 @@ export default function ImportsView() {
         </span>
       </div>
 
-      <input ref={docFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => void onDocFile(e)} />
+      {docs.input}
 
       <div className="scroll">
         <table className="tbl">
@@ -280,8 +286,8 @@ export default function ImportsView() {
               <th colSpan={10} className="text-center border-l border-line" style={{ position: "static" }}>
                 Taxes as per customs (amount and MP code)
               </th>
-              <th className="text-center border-l border-line" style={{ position: "static" }}>
-                Document
+              <th colSpan={3} className="text-center border-l border-line" style={{ position: "static" }}>
+                Documents
               </th>
             </tr>
             <tr>
@@ -309,7 +315,7 @@ export default function ImportsView() {
               <th className="num">VAT</th>
               <th>Type</th>
               <th>Code</th>
-              <DocHeading title="CusDec" canWrite={canWrite} className="border-l border-line" />
+              <CustomsDocHeadings canWrite={canWrite} />
             </tr>
             <FilterRow state={cf} />
           </thead>
@@ -351,7 +357,11 @@ export default function ImportsView() {
         repeated on each line. Customs value is the item’s statistical value (box 46). The tax columns are the CID, PAL,
         SSCL and VAT lines of the item’s tax table with their MP codes; Value for VAT is the VAT line’s tax base and feeds
         the imports check on the VAT reconciliation tab. Uploading the same CusDec and invoice number again replaces its
-        lines.
+        lines. Each CusDec keeps three files, whether its lines came from the PDFs or a spreadsheet: the CusDec itself,
+        the other documents (invoice, packing list, bill of lading) and all documents as one bundle; upload or open them
+        in the Documents columns.
+        {isAdmin &&
+          " Admins can correct the uploaded data with “Edit uploaded data”: the declaration columns are edited on the first item line of a CusDec and saved to all its lines. Uploading that CusDec again replaces the corrections."}
       </div>
     </>
   );

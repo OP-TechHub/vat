@@ -228,6 +228,9 @@ export type ExportEditable = Pick<
   | "updated_in_custom_report"
 >;
 
+/** Fields of an export sale / import purchase that came from the uploaded report: admins may correct them. */
+export type ExportReportEditable = Pick<ExportSale, "invoice_no" | "amount_fc" | "ex_rate" | "net_sales">;
+
 /** Row of customs_entries: one customs declaration line as stored. */
 export interface CustomsEntry {
   id: string;
@@ -263,9 +266,36 @@ export interface CustomsEntry {
   doc_path?: string | null;
   doc_name?: string | null;
   doc_uploaded_at?: string | null;
+  /** Other documents of the declaration (invoice, packing list, bill of lading...), when kept. */
+  other_doc_path?: string | null;
+  other_doc_name?: string | null;
+  other_doc_uploaded_at?: string | null;
+  /** The whole bundle of documents, when kept. */
+  all_doc_path?: string | null;
+  all_doc_name?: string | null;
+  all_doc_uploaded_at?: string | null;
   created_at: string;
   created_by: string | null;
 }
+
+/** Fields of a stored customs entry that admins may correct after the upload. */
+export type CustomsEditable = Omit<
+  CustomsEntry,
+  | "id"
+  | "company_id"
+  | "direction"
+  | "doc_path"
+  | "doc_name"
+  | "doc_uploaded_at"
+  | "other_doc_path"
+  | "other_doc_name"
+  | "other_doc_uploaded_at"
+  | "all_doc_path"
+  | "all_doc_name"
+  | "all_doc_uploaded_at"
+  | "created_at"
+  | "created_by"
+>;
 
 /** Parsed customs entry (one CusDec item line) ready for replace_customs_entries. Null = not in the file. */
 export interface CustomsUploadRow {

@@ -111,6 +111,8 @@ export function exportWorkbook(
         "VAT Type": e.vat_type ?? "",
         "VAT Code": e.vat_code ?? "",
         "CusDec File": e.doc_name ?? "",
+        "Other Documents File": e.other_doc_name ?? "",
+        "All Documents File": e.all_doc_name ?? "",
       });
   if (im.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(im), "Import Register");
 

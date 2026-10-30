@@ -4,16 +4,24 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { useApp } from "./AppShell";
 import { customsTemplateFilename, customsTemplateWorkbook, parseCustoms } from "@/lib/parse";
 import { downloadWorkbook } from "@/lib/download";
-import { uploadCusdecDocument } from "@/lib/customsDocs";
+import { CUSTOMS_DOC_KINDS, uploadCustomsDocument, type CustomsDocKind } from "@/lib/customsDocs";
 import { fmt } from "@/lib/format";
 import type { CustomsUploadRow, ReconDirection } from "@/lib/types";
+
+type RowDocs = Partial<Record<CustomsDocKind, File>>;
+
+/** Declaration a review row belongs to: its CusDec and invoice numbers. */
+const declKey = (r: CustomsUploadRow) => r.cusdec_no.trim() + "|" + r.invoice_no.trim();
 
 interface Pending {
   rows: CustomsUploadRow[];
   /** Per-row notes from the PDF reader (empty for spreadsheet rows). */
   notes: string[][];
-  /** The CusDec file each row came from, kept with the entry on save (null for spreadsheet rows). */
-  files: (File | null)[];
+  /**
+   * Files to keep with each row's declaration on save, by slot: a CusDec PDF goes in as the CusDec (or as all
+   * documents when it is a bundle); more can be attached in the review table, for spreadsheet rows too.
+   */
+  docs: RowDocs[];
   text: string;
   source: "sheet" | "pdf";
 }
@@ -74,7 +82,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     rd.onload = () => {
       try {
         const p = parseCustoms(rd.result as ArrayBuffer, direction);
-        setPending({ rows: p.rows, notes: p.rows.map(() => []), files: p.rows.map(() => null), text: p.text, source: "sheet" });
+        setPending({ rows: p.rows, notes: p.rows.map(() => []), docs: p.rows.map(() => ({})), text: p.text, source: "sheet" });
       } catch (err) {
         setParseError(err instanceof Error ? err.message : "Could not read the file.");
       }
@@ -90,6 +98,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     setPending(null);
     const rows: CustomsUploadRow[] = [];
     const notes: string[][] = [];
+    const rowDocs: RowDocs[] = [];
     const pdfFiles: File[] = [];
     const failed: string[] = [];
     try {
@@ -113,10 +122,13 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
             const where =
               read.pageCount > pages.length && pages.length ? ` (page${pages.length === 1 ? "" : "s"} ${pages.join(", ")} of ${read.pageCount})` : "";
             const which = found.length > 1 ? `, CusDec ${d + 1} of ${found.length}` : "";
+            // A file holding more than the CusDec pages is the bundle of all documents.
+            const kind: CustomsDocKind = pages.length && read.pageCount > pages.length ? "all" : "cusdec";
             // One row per item (HS code line); the header fields repeat on each.
             r.items.forEach((row, n) => {
               rows.push(row);
               pdfFiles.push(files[i]);
+              rowDocs.push(n === 0 ? { [kind]: files[i] } : {});
               notes.push(
                 n === 0
                   ? [
@@ -146,7 +158,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     setPending({
       rows,
       notes,
-      files: pdfFiles,
+      docs: rowDocs,
       source: "pdf",
       text:
         `${decls} CusDec${decls === 1 ? "" : "s"} read (${rows.length} item line${rows.length === 1 ? "" : "s"}), customs value ${fmt(value)}. Check the figures below (every box can be corrected), then save.` +
@@ -163,6 +175,69 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
 
   const setRow = (i: number, patch: Partial<CustomsUploadRow>) =>
     setPending((p) => p && { ...p, rows: p.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+
+  // Attaching documents in the review table: one hidden picker, pointed at a row and slot when clicked.
+  const docRef = useRef<HTMLInputElement>(null);
+  const docTarget = useRef<{ i: number; kind: CustomsDocKind } | null>(null);
+  const setDoc = (i: number, kind: CustomsDocKind, file: File | null) =>
+    setPending(
+      (p) =>
+        p && {
+          ...p,
+          docs: p.docs.map((d, j) => {
+            if (j !== i) return d;
+            const next = { ...d };
+            if (file) next[kind] = file;
+            else delete next[kind];
+            return next;
+          }),
+        },
+    );
+  function onDocPicked(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const t = docTarget.current;
+    e.target.value = "";
+    if (file && t) setDoc(t.i, t.kind, file);
+  }
+  /** Documents cell of a review row: the three slots on the first line of each declaration. */
+  const docsCell = (i: number, r: CustomsUploadRow) => {
+    if (!pending || pending.rows.findIndex((x) => declKey(x) === declKey(r)) !== i)
+      return <span className="text-muted">as above</span>;
+    return (
+      <div className="flex flex-col gap-1">
+        {CUSTOMS_DOC_KINDS.map(({ kind, label }) => {
+          const file = pending.docs[i]?.[kind];
+          return (
+            <div key={kind} className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="text-muted w-[110px]">{label}</span>
+              {file ? (
+                <>
+                  <span className="pill pill-good max-w-[180px] truncate" title={file.name}>
+                    {file.name}
+                  </span>
+                  <button className="btn btn-icon" type="button" title="Remove" aria-label={`Remove ${label} file, row ${i + 1}`} onClick={() => setDoc(i, kind, null)}>
+                    ×
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="btn"
+                  type="button"
+                  aria-label={`Attach ${label} file, row ${i + 1}`}
+                  onClick={() => {
+                    docTarget.current = { i, kind };
+                    docRef.current?.click();
+                  }}
+                >
+                  Attach
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   /** A cell of the review table: plain text for spreadsheet rows, a box that writes back for PDF rows (OCR can misread). */
   const cell = (i: number, r: CustomsUploadRow, field: keyof CustomsUploadRow, kind: "text" | "num", width = "w-[90px]") => {
@@ -213,29 +288,36 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     }
     const r = (data ?? {}) as { entries?: number; applied?: number };
     const n = pending.rows.length;
-    // Keep the CusDec files with their entries so they can be opened from the table.
-    // Each PDF once per declaration it holds, however many item lines that gave; the file is recorded on
-    // every line of the declaration.
+    // Keep the documents with their entries so they can be opened from the table: one file per
+    // declaration and slot (the first row of the declaration holding one), recorded on every line of it.
     const seen = new Set<string>();
-    const toStore = pending.rows
-      .map((row, i) => ({ row, file: pending.files[i] }))
-      .filter((x) => {
-        if (!x.file) return false;
-        const k = `${pending.files.indexOf(x.file)}|${x.row.cusdec_no.trim()}|${x.row.invoice_no.trim()}`;
-        if (seen.has(k)) return false;
+    const toStore: { row: CustomsUploadRow; kind: CustomsDocKind; file: File }[] = [];
+    pending.rows.forEach((row, i) => {
+      for (const { kind } of CUSTOMS_DOC_KINDS) {
+        const file = pending.docs[i]?.[kind];
+        const k = declKey(row) + "|" + kind;
+        if (!file || seen.has(k)) continue;
         seen.add(k);
-        return true;
-      });
+        toStore.push({ row, kind, file });
+      }
+    });
     let stored = 0;
     const storeErrors: string[] = [];
     for (let i = 0; i < toStore.length; i++) {
-      const { row, file } = toStore[i];
-      setBusy(`Storing CusDec ${i + 1} of ${toStore.length}…`);
+      const { row, kind, file } = toStore[i];
+      setBusy(`Storing document ${i + 1} of ${toStore.length}…`);
       try {
-        await uploadCusdecDocument(supabase, company.id, direction, { cusdec_no: row.cusdec_no.trim(), invoice_no: row.invoice_no.trim() }, file!);
+        await uploadCustomsDocument(
+          supabase,
+          company.id,
+          direction,
+          { cusdec_no: row.cusdec_no.trim(), invoice_no: row.invoice_no.trim() },
+          kind,
+          file,
+        );
         stored++;
       } catch (err) {
-        storeErrors.push(`${file!.name}: ${err instanceof Error ? err.message : String(err)}`);
+        storeErrors.push(`${file.name}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     setBusy(null);
@@ -244,7 +326,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     flash(
       `Saved ${r.entries ?? n} ${noun} customs entries` +
         (isImport ? " to the Import Register." : `; the customs columns of ${r.applied ?? 0} matching sales invoices were filled in.`) +
-        (toStore.length ? ` ${stored} CusDec file${stored === 1 ? "" : "s"} kept.` : "") +
+        (toStore.length ? ` ${stored} document${stored === 1 ? "" : "s"} kept.` : "") +
         (storeErrors.length ? ` Not kept: ${storeErrors.join("; ")}` : ""),
       storeErrors.length > 0,
     );
@@ -265,7 +347,10 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
         {isImport
           ? " Each line goes into the Import Register under its CusDec month."
           : " Each entry is matched to the sales row with the same invoice number and its “As per customs” columns are filled in; entries are kept, so a month uploaded later is filled too."}{" "}
-        The same CusDec and invoice number uploaded again replaces its earlier lines.
+        The same CusDec and invoice number uploaded again replaces its earlier lines. Before saving, attach the CusDec,
+        the other documents and all documents (the full bundle) to each CusDec in the Documents column, for spreadsheet
+        lines too; a CusDec PDF is kept as the CusDec, or as all documents when it is a bundle. Files can also be added
+        later from the table below.
       </div>
       <div className="bar">
         <label className="field">
@@ -304,6 +389,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       {pending && (
         <>
           <div className="msg">{pending.text}</div>
+          <input ref={docRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onDocPicked} />
           <div className="scroll max-h-[36vh]">
             <table className="tbl">
               <thead>
@@ -324,6 +410,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                   {isImport && <th className="num">Value for VAT</th>}
                   {isImport && <th className="num">VAT</th>}
                   <th>{isImport ? "Supplier" : "Consignee"}</th>
+                  <th>Documents</th>
                   {pending.source === "pdf" && <th>Notes</th>}
                 </tr>
               </thead>
@@ -373,6 +460,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                     {isImport && <td className="num">{cell(i, r, "vat_base", "num", "w-[110px]")}</td>}
                     {isImport && <td className="num">{cell(i, r, "vat_amount", "num", "w-[100px]")}</td>}
                     <td className="wrapc">{r.party}</td>
+                    <td>{docsCell(i, r)}</td>
                     {pending.source === "pdf" && (
                       <td className="wrapc">
                         {pending.notes[i]?.map((n, j) => (
@@ -386,7 +474,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                 ))}
                 {pending.rows.length > 200 && (
                   <tr>
-                    <td colSpan={17} className="note">
+                    <td colSpan={18} className="note">
                       … and {pending.rows.length - 200} more rows.
                     </td>
                   </tr>
