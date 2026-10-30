@@ -25,11 +25,14 @@ const isDoc = (f: File) => /\.(pdf|jpe?g|png)$/i.test(f.name);
 export default function BulkDocumentUpload({
   periods,
   existing,
+  canReplace,
   onDone,
 }: {
   /** Period keys the register offers, oldest first. */
   periods: string[];
   existing: ReturnDocument[];
+  /** Delete permission: documents already held may be replaced; otherwise those files are skipped. */
+  canReplace: boolean;
   onDone: () => void;
 }) {
   const { supabase, company, user, flash } = useApp();
@@ -98,9 +101,9 @@ export default function BulkDocumentUpload({
     acc.push({ i, dup });
     return acc;
   }, []);
-  const toUpload = ready.filter((x) => !x.dup);
   const has = (period: string, kind: DocumentKind | "") =>
     !!kind && existing.some((d) => d.return_month.slice(0, 7) === period && d.kind === kind);
+  const toUpload = ready.filter((x) => !x.dup && (canReplace || !has(rows![x.i].period, rows![x.i].kind)));
 
   async function upload() {
     if (!rows || !company) return;
@@ -199,7 +202,11 @@ export default function BulkDocumentUpload({
                         ) : slot?.dup ? (
                           <span className="pill pill-bad">Duplicate, skipped</span>
                         ) : has(r.period, r.kind) ? (
-                          <span className="pill pill-info">Replaces existing</span>
+                          canReplace ? (
+                            <span className="pill pill-info">Replaces existing</span>
+                          ) : (
+                            <span className="pill pill-warn">Already held, skipped (replacing needs delete permission)</span>
+                          )
                         ) : (
                           <span className="pill pill-good">New</span>
                         )}

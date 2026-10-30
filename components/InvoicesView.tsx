@@ -31,7 +31,8 @@ const claimValue = (r: Invoice) =>
   r.manual_not_claimed ? "none" : r.manual_claim_month ? monthKey(r.manual_claim_month) : "";
 
 export default function InvoicesView() {
-  const { supabase, company, months, yearInvoices, loading, canWrite, user, patchInvoice, flash } = useApp();
+  const { supabase, company, months, yearInvoices, loading, perm, user, patchInvoice, flash } = useApp();
+  const p = perm("invoices");
   const data = useMemo(() => ({ invoices: yearInvoices }), [yearInvoices]);
 
   const [fMonth, setFMonth] = useState("");
@@ -133,12 +134,13 @@ export default function InvoicesView() {
 
   return (
     <>
-      {canWrite && (
+      {p.upload && (
         <UploadPanel
           kind="ledger"
           month={upMonth}
           onMonthChange={setUpMonth}
           existingCount={countFor}
+          canReplace={p.delete}
           onSaved={(m) => {
             setFMonth(m);
             setPage(0);
@@ -243,7 +245,7 @@ export default function InvoicesView() {
                 <td colSpan={9} className="note">
                   {data.invoices.length
                     ? "No invoices match these filters."
-                    : canWrite
+                    : p.upload
                       ? "No invoices yet. Upload a month’s ledger list above to add them."
                       : "No invoices held for this tax year."}
                 </td>
@@ -261,7 +263,7 @@ export default function InvoicesView() {
                     <td className="wrapc">{r.description}</td>
                     <td className="num">{fmt(r.amount_lcy)}</td>
                     <td>
-                      {canWrite ? (
+                      {p.edit ? (
                         <select
                           className="control"
                           value={r.original_invoice ?? ""}
@@ -283,7 +285,7 @@ export default function InvoicesView() {
                       </span>
                     </td>
                     <td>
-                      {canWrite ? (
+                      {p.edit ? (
                         <select
                           className="control"
                           value={claimValue(r)}

@@ -12,6 +12,7 @@ import {
   uploadCustomsDocument,
   type CustomsDocKind,
 } from "@/lib/customsDocs";
+import type { Perm } from "@/lib/permissions";
 import type { CustomsEntry, ReconDirection } from "@/lib/types";
 
 /** Filter boxes of the three document columns. */
@@ -69,11 +70,11 @@ export function CustomsSearch({ value, onChange }: { value: string; onChange: (v
 }
 
 /** Headings of the three document columns. */
-export function CustomsDocHeadings({ canWrite }: { canWrite: boolean }) {
+export function CustomsDocHeadings({ perm }: { perm: Perm }) {
   return (
     <>
       {CUSTOMS_DOC_KINDS.map(({ kind, label }, i) => (
-        <DocHeading key={kind} title={label} canWrite={canWrite} className={i === 0 ? "border-l border-line" : undefined} />
+        <DocHeading key={kind} title={label} perm={perm} className={i === 0 ? "border-l border-line" : undefined} />
       ))}
     </>
   );
@@ -90,7 +91,8 @@ interface HeldDoc {
  * to render once. `onChanged` runs after a file is kept or removed.
  */
 export function useCustomsDocs(direction: ReconDirection, onChanged: () => void | Promise<void>) {
-  const { supabase, company, canWrite, flash } = useApp();
+  const { supabase, company, perm, flash } = useApp();
+  const p = perm(direction === "export" ? "exports" : "imports");
   const [busyId, setBusyId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const target = useRef<{ entry: CustomsEntry; kind: CustomsDocKind } | null>(null);
@@ -103,7 +105,7 @@ export function useCustomsDocs(direction: ReconDirection, onChanged: () => void 
     if (!file || !t || !company) return;
     setBusyId(t.entry.id);
     try {
-      await uploadCustomsDocument(supabase, company.id, direction, t.entry, t.kind, file, customsDoc(t.entry, t.kind)?.path);
+      await uploadCustomsDocument(supabase, company.id, direction, t.entry, t.kind, file);
       flash(`${labelOf(t.kind)} for CusDec ${t.entry.cusdec_no} kept.`);
       await onChanged();
     } catch (err) {
@@ -137,7 +139,7 @@ export function useCustomsDocs(direction: ReconDirection, onChanged: () => void 
         {entry ? (
           <DocActions<HeldDoc>
             doc={customsDoc(entry, kind)}
-            canWrite={canWrite}
+            perm={p}
             busy={busyId === entry.id}
             yes="Held"
             no="None"

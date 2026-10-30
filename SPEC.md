@@ -10,7 +10,7 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 ## Data (see `supabase/migrations/0001_init.sql`)
 | Table / view | Purpose |
 |---|---|
-| `companies`, `company_members` | Each client company; users get a role per company: viewer, editor, admin |
+| `companies`, `company_members`, `company_member_permissions` | Each client company; users get a role per company (admin or member) and, as members, permissions per tab |
 | `ledger_invoices` | Input invoices as per the ledger VAT control account |
 | `schedule_lines` | Local input schedule submitted to IRD, per return month |
 | `vat_returns` | One row of return figures per month |
@@ -67,7 +67,7 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
    - Columns: Period code, Taxable period, Deferred import VAT (cage 4 of the period's return), Refund due (cage 15), Net refund (cage 18 negated: refund due less credits and tax payable, highlighted when tax is payable), Status, Date of credit voucher, Value of credit voucher, Credit voucher attachment. Totals row for the amounts.
    - Status is one of Credit voucher received, Credit voucher pending, Information under submission, or not set; held in `ird_status` with the voucher date and value. Date, value and attachment are editable once the status is received. The voucher is a `return_documents` row of kind `credit_voucher` in the `vat-claims` bucket, with Open / Attach / Replace / Remove.
 6. **Export to Excel**: Invoice Listing (with status and claim month), IRD Submitted Input, VAT Returns.
-7. **Members** (admin only): invite by email, set role, remove.
+7. **Members** (admin only): invite by email, set role and per-tab permissions (V / U / E / D grid, presets), remove.
 8. **Column filters** on the row tables (Invoice listing, IRD input schedule, Export reconciliation, Import Register, Return filing, IRD status): a filter box under every column heading (`components/ColumnFilters.tsx`); contains-match on text, comparisons and ranges on numbers, `blank` for empty cells, yes / no for Yes / No columns; boxes combine; totals follow the filtered rows; Clear button while any is set.
 
 ## Upload formats (`templates/`)
@@ -77,7 +77,8 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 - Find the header row within the first 15 rows; match columns by heading text, not position. Accept Excel serial dates and dd.mm.yyyy / dd/mm/yyyy / yyyy-mm-dd text. Accept .xlsx, .xls, .csv.
 
 ## Permissions
-- viewer: read only; all edit controls hidden. editor: uploads, inline edits, return entry. admin: also manages members.
+- admin: everything on every tab, and manages members. member: access set per tab in `company_member_permissions` (migration 0014): no row = no access (tab hidden, data unreadable); a row = view, plus any of upload (first upload of a month or a document into an empty slot), edit (inline edits, rows by hand, return figures, IRD status, "Edit uploaded data") and delete (delete rows, replace / remove documents, re-upload data already held). Summary is view only; Return filing has no edit.
+- Data belongs to tabs: ledger_invoices → Invoice listing, schedule_lines → IRD input schedule, export_sales and export customs entries → Export reconciliation, import_purchases and import customs entries → Import Register, vat_returns → VAT reconciliation (also readable with view on Return filing or IRD status), returns / acknowledgements → VAT reconciliation or Return filing, credit vouchers and ird_status → IRD status. Uploads go through `upload_*` functions that check upload (and delete when replacing).
 - Enforced by RLS in the database; the UI only mirrors it. Never use the service-role key in the browser.
 
 ## Acceptance checks (with the seed data, tax year 2026/27)

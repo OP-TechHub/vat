@@ -1,7 +1,8 @@
 /**
  * Filed return and IRD acknowledgement documents, one of each per period, kept in the private
  * "vat-claims" storage bucket under <company_id>/<YYYY-MM>/<kind>/<filename> and listed in
- * return_documents. Storage policies mirror the company roles (migration 0005).
+ * return_documents. Storage policies follow the tab permissions (migration 0014): a new document needs
+ * upload, replacing or removing one needs delete.
  */
 import type { Db } from "./supabase/schema";
 import type { DocumentKind, ReturnDocument } from "./types";
@@ -44,7 +45,8 @@ export async function uploadDocument(
     const rm = await sb.storage.from(BUCKET).remove([existing.path]);
     if (rm.error) throw new Error(rm.error.message);
   }
-  const up = await sb.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type || undefined });
+  // Overwriting a file counts as replacing it (delete permission), so only a replacement may overwrite.
+  const up = await sb.storage.from(BUCKET).upload(path, file, { upsert: !!existing, contentType: file.type || undefined });
   if (up.error) throw new Error(up.error.message);
   const row: ReturnDocument = {
     company_id: companyId,

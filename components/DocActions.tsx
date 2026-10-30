@@ -1,6 +1,7 @@
 "use client";
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { Perm } from "@/lib/permissions";
 import type { ReturnDocument } from "@/lib/types";
 
 export type IconName = "open" | "upload" | "replace" | "remove";
@@ -91,23 +92,32 @@ export function IconLegend({ icons }: { icons: IconName[] }) {
   );
 }
 
+/** Document actions a permission allows: Upload into an empty slot, Replace (upload and delete), Remove. */
+export function docIcons(perm: Perm): IconName[] {
+  const icons: IconName[] = ["open"];
+  if (perm.upload) icons.push("upload");
+  if (perm.upload && perm.delete) icons.push("replace");
+  if (perm.delete) icons.push("remove");
+  return icons;
+}
+
 /** Column heading with the action legend under its title. */
-export function DocHeading({ title, canWrite, className }: { title: string; canWrite: boolean; className?: string }) {
+export function DocHeading({ title, perm, className }: { title: string; perm: Perm; className?: string }) {
   return (
     <th className={className}>
       <div>{title}</div>
-      <IconLegend icons={canWrite ? ["open", "upload", "replace", "remove"] : ["open"]} />
+      <IconLegend icons={docIcons(perm)} />
     </th>
   );
 }
 
 /**
- * Status pill and the action icons for one document slot: Open when held; for editors Upload when
- * empty, or Replace and Remove when held.
+ * Status pill and the action icons for one document slot: Open when held; Upload when empty (upload
+ * permission); Replace (upload and delete) and Remove (delete) when held.
  */
 export function DocActions<T extends { filename: string } = ReturnDocument>({
   doc,
-  canWrite,
+  perm,
   busy,
   onOpen,
   onPick,
@@ -118,7 +128,7 @@ export function DocActions<T extends { filename: string } = ReturnDocument>({
   showName,
 }: {
   doc: T | null | undefined;
-  canWrite: boolean;
+  perm: Perm;
   busy?: boolean;
   onOpen: (doc: T) => void;
   onPick: () => void;
@@ -134,15 +144,14 @@ export function DocActions<T extends { filename: string } = ReturnDocument>({
     <div className="flex items-center gap-1.5">
       <span className={"pill " + (doc ? "pill-good" : (pillClass ?? "pill-warn"))}>{doc ? yes : no}</span>
       {doc && <IconButton icon="open" label={`Open ${doc.filename}`} onClick={() => onOpen(doc)} />}
-      {canWrite &&
-        (doc ? (
-          <>
-            <IconButton icon="replace" label="Replace" disabled={busy} onClick={onPick} />
-            <IconButton icon="remove" label="Remove" danger disabled={busy} onClick={() => onRemove(doc)} />
-          </>
-        ) : (
-          <IconButton icon="upload" label="Upload" disabled={busy} onClick={onPick} />
-        ))}
+      {doc ? (
+        <>
+          {perm.upload && perm.delete && <IconButton icon="replace" label="Replace" disabled={busy} onClick={onPick} />}
+          {perm.delete && <IconButton icon="remove" label="Remove" danger disabled={busy} onClick={() => onRemove(doc)} />}
+        </>
+      ) : (
+        perm.upload && <IconButton icon="upload" label="Upload" disabled={busy} onClick={onPick} />
+      )}
       {showName && doc && (
         <span className="text-[12px] text-muted truncate max-w-[180px]" title={doc.filename}>
           {doc.filename}

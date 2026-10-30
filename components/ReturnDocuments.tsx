@@ -16,11 +16,13 @@ import {
 import type { DocumentKind, ReturnDocument } from "@/lib/types";
 
 /**
- * The VAT return and acknowledgement documents of one period: Yes/No, Open, and for editors
- * Upload / Replace / Remove. Used in the left panel of the VAT reconciliation tab.
+ * The VAT return and acknowledgement documents of one period: Yes/No, Open, and per the tab's permissions
+ * Upload (upload), Replace (upload and delete) and Remove (delete). Used in the left panel of the VAT
+ * reconciliation tab.
  */
 export default function ReturnDocuments({ month, onChange }: { month: string; onChange?: () => void }) {
-  const { supabase, company, user, canWrite, flash } = useApp();
+  const { supabase, company, user, perm, flash } = useApp();
+  const p = perm("returns");
   const [docs, setDocs] = useState<ReturnDocument[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<DocumentKind | null>(null);
@@ -114,17 +116,15 @@ export default function ReturnDocuments({ month, onChange }: { month: string; on
                 Open
               </button>
             )}
-            {canWrite && docs != null && (
-              <>
-                <button className="btn" type="button" disabled={isBusy} onClick={() => pick(kind)}>
-                  {doc ? "Replace" : "Upload"}
-                </button>
-                {doc && (
-                  <button className="btn btn-danger" type="button" disabled={isBusy} onClick={() => void remove(doc)}>
-                    Remove
-                  </button>
-                )}
-              </>
+            {docs != null && (doc ? p.upload && p.delete : p.upload) && (
+              <button className="btn" type="button" disabled={isBusy} onClick={() => pick(kind)}>
+                {doc ? "Replace" : "Upload"}
+              </button>
+            )}
+            {docs != null && doc && p.delete && (
+              <button className="btn btn-danger" type="button" disabled={isBusy} onClick={() => void remove(doc)}>
+                Remove
+              </button>
             )}
           </div>
         );

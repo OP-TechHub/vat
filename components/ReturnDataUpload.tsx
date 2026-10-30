@@ -9,7 +9,7 @@ import { parseReturnWorkbook, type ParsedReturns } from "@/lib/parse";
  * upserted into vat_returns. Ledger figures already entered for a period are kept.
  */
 export default function ReturnDataUpload({ onSaved }: { onSaved?: (months: string[]) => void }) {
-  const { supabase, company, user, reload, flash } = useApp();
+  const { supabase, company, reload, flash } = useApp();
   const [pending, setPending] = useState<ParsedReturns | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -41,16 +41,14 @@ export default function ReturnDataUpload({ onSaved }: { onSaved?: (months: strin
   async function save() {
     if (!pending || !company) return;
     setSaving(true);
-    const now = new Date().toISOString();
-    const payload = pending.periods.map((p) => ({ ...p, company_id: company.id, updated_by: user.id, updated_at: now }));
-    const { error } = await supabase.from("vat_returns").upsert(payload, { onConflict: "company_id,return_month" });
+    const { error } = await supabase.rpc("upload_vat_returns", { p_company: company.id, p_rows: pending.periods });
     setSaving(false);
     if (error) {
       flash(
         "Could not save: " +
           error.message +
-          (/schema cache|column/i.test(error.message)
-            ? ". Run supabase/migrations/0006_return_cages.sql in the Supabase SQL Editor first."
+          (/schema cache|function/i.test(error.message)
+            ? ". Run supabase/migrations/0014_tab_permissions.sql in the Supabase SQL Editor first."
             : ""),
         true,
       );
@@ -70,7 +68,7 @@ export default function ReturnDataUpload({ onSaved }: { onSaved?: (months: strin
         The “VAT Return_Upload” workbook: one column per taxable period, the period’s first day in the “Taxable
         period” row, the acknowledgement date in the “Date of submission” row and the cage codes in column B. Every
         period in the file is saved, whatever the tax year selected above. Figures already entered for a period are
-        replaced; ledger figures are kept.
+        replaced (which needs delete permission on this tab as well as upload); ledger figures are kept.
       </div>
       <div className="bar">
         <label className="field">

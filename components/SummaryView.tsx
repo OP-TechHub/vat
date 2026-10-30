@@ -16,7 +16,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub: string
 }
 
 export default function SummaryView() {
-  const { months, data, yearInvoices, loading, canWrite } = useApp();
+  const { months, data, yearInvoices, loading, perm } = useApp();
 
   const t = useMemo(() => tiles(yearInvoices), [yearInvoices]);
   const mw = useMemo(() => monthWise(yearInvoices, months), [yearInvoices, months]);
@@ -31,7 +31,7 @@ export default function SummaryView() {
     return (
       <div className="panel note">
         No records for this tax year yet.
-        {canWrite ? " Start by uploading a month’s ledger invoice list on the Invoice listing tab." : ""}
+        {perm("invoices").upload ? " Start by uploading a month’s ledger invoice list on the Invoice listing tab." : ""}
       </div>
     );
 

@@ -279,7 +279,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
   async function save() {
     if (!pending || !company || incomplete) return;
     setBusy("Saving…");
-    const { data, error } = await supabase.rpc("replace_customs_entries", {
+    const { data, error } = await supabase.rpc("upload_customs_entries", {
       p_company: company.id,
       p_direction: direction,
       p_rows: pending.rows.map((r) => ({ ...r, cusdec_no: r.cusdec_no.trim(), invoice_no: r.invoice_no.trim() })),
@@ -289,7 +289,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       flash(
         "Could not save: " +
           error.message +
-          (/schema cache|function|file_name/i.test(error.message) ? ". Run the latest supabase/migrations (0013_customs_file_name.sql) in the Supabase SQL Editor first." : ""),
+          (/schema cache|function|file_name/i.test(error.message) ? ". Run the latest supabase/migrations (0014_tab_permissions.sql) in the Supabase SQL Editor first." : ""),
         true,
       );
       return;
@@ -355,7 +355,8 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
         {isImport
           ? " Each line goes into the Import Register under its CusDec month."
           : " Each entry is matched to the sales row with the same invoice number and its “As per customs” columns are filled in; entries are kept, so a month uploaded later is filled too."}{" "}
-        The same CusDec and invoice number uploaded again replaces its earlier lines. Before saving, attach the CusDec,
+        The same CusDec and invoice number uploaded again replaces its earlier lines, which needs delete permission on this
+        tab as well as upload. Before saving, attach the CusDec,
         the other documents and all documents (the full bundle) to each CusDec in the Documents column, for spreadsheet
         lines too; a CusDec PDF is kept as the CusDec, or as all documents when it is a bundle. Files can also be added
         later from the table below.

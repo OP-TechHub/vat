@@ -36,7 +36,11 @@ export function customsDoc(entry: CustomsEntry, kind: CustomsDocKind): { path: s
   return path ? { path, filename: entry[c.name] ?? entry.cusdec_no } : null;
 }
 
-/** Upload (or replace) a document of a customs declaration and record it on all its lines. Returns the stored path. */
+/**
+ * Upload (or replace) a document of a customs declaration and record it on all its lines. Returns the stored
+ * path. The file already held in the slot is read from the database, so a re-uploaded CusDec that kept its
+ * documents is handled as a replacement.
+ */
 export async function uploadCustomsDocument(
   sb: Db,
   companyId: string,
@@ -44,25 +48,41 @@ export async function uploadCustomsDocument(
   key: Pick<CustomsEntry, "cusdec_no" | "invoice_no">,
   kind: CustomsDocKind,
   file: File,
-  previousPath?: string | null,
 ): Promise<string> {
   const c = COLS[kind];
   const path = `${companyId}/customs/${direction}/${safe(key.cusdec_no)}/${c.dir}${safe(file.name)}`;
+  const held = await sb
+    .from("customs_entries")
+    .select(c.path)
+    .match({ company_id: companyId, direction, cusdec_no: key.cusdec_no, invoice_no: key.invoice_no })
+    .order("item_no")
+    .limit(1)
+    .maybeSingle();
+  if (held.error) throw new Error(held.error.message);
+  const previousPath = (held.data as Record<string, string | null> | null)?.[c.path] ?? null;
   if (previousPath && previousPath !== path) {
     const rm = await sb.storage.from(BUCKET).remove([previousPath]);
     if (rm.error) throw new Error(rm.error.message);
   }
-  const up = await sb.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type || undefined });
+  // Overwriting a file counts as replacing it (delete permission), so only a replacement may overwrite.
+  const up = await sb.storage
+    .from(BUCKET)
+    .upload(path, file, { upsert: !!previousPath, contentType: file.type || undefined });
   if (up.error) throw new Error(up.error.message);
-  const { error } = await sb
-    .from("customs_entries")
-    .update({ [c.path]: path, [c.name]: file.name, [c.at]: new Date().toISOString() })
-    .match({ company_id: companyId, direction, cusdec_no: key.cusdec_no, invoice_no: key.invoice_no });
+  const { error } = await sb.rpc("set_customs_document", {
+    p_company: companyId,
+    p_direction: direction,
+    p_cusdec_no: key.cusdec_no,
+    p_invoice_no: key.invoice_no,
+    p_kind: kind,
+    p_path: path,
+    p_name: file.name,
+  });
   if (error)
     throw new Error(
       error.message +
-        (kind !== "cusdec" && /column|schema cache/i.test(error.message)
-          ? ". Run supabase/migrations/0012_customs_documents.sql in the Supabase SQL Editor first."
+        (/function|schema cache/i.test(error.message)
+          ? ". Run supabase/migrations/0014_tab_permissions.sql in the Supabase SQL Editor first."
           : ""),
     );
   return path;
@@ -77,15 +97,19 @@ export async function cusdecDocumentUrl(sb: Db, path: string, seconds = 300): Pr
 
 /** Remove a document from storage and clear its slot on every item line of that CusDec and invoice. */
 export async function removeCustomsDocument(sb: Db, entry: CustomsEntry, kind: CustomsDocKind): Promise<void> {
-  const c = COLS[kind];
-  const path = entry[c.path];
+  const path = entry[COLS[kind].path];
   if (path) {
     const rm = await sb.storage.from(BUCKET).remove([path]);
     if (rm.error) throw new Error(rm.error.message);
   }
-  const { error } = await sb
-    .from("customs_entries")
-    .update({ [c.path]: null, [c.name]: null, [c.at]: null })
-    .match({ company_id: entry.company_id, direction: entry.direction, cusdec_no: entry.cusdec_no, invoice_no: entry.invoice_no });
+  const { error } = await sb.rpc("set_customs_document", {
+    p_company: entry.company_id,
+    p_direction: entry.direction,
+    p_cusdec_no: entry.cusdec_no,
+    p_invoice_no: entry.invoice_no,
+    p_kind: kind,
+    p_path: null,
+    p_name: null,
+  });
   if (error) throw new Error(error.message);
 }

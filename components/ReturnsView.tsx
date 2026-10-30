@@ -26,7 +26,8 @@ const fromReturn = (r: VatReturn | undefined): FormValues =>
   r ? (Object.fromEntries(RETURN_FIELD_IDS.map((id) => [id, fmtIn(r[id])])) as FormValues) : blank();
 
 export default function ReturnsView() {
-  const { supabase, company, user, months, data, loading, canWrite, patchReturn, setYear, flash } = useApp();
+  const { supabase, company, user, months, data, loading, perm, patchReturn, setYear, flash } = useApp();
+  const p = perm("returns");
   const [month, setMonth] = useState("");
   const [form, setForm] = useState<FormValues>(blank());
   const [submittedOn, setSubmittedOn] = useState("");
@@ -137,7 +138,7 @@ export default function ReturnsView() {
 
   return (
     <>
-      {canWrite && (
+      {p.upload && (
         <ReturnDataUpload
           onSaved={(ms) => {
             // Show the latest period that was loaded; switch tax year if it lies outside the current one.
@@ -171,7 +172,7 @@ export default function ReturnsView() {
                 className="control"
                 type="date"
                 value={submittedOn}
-                disabled={!canWrite}
+                disabled={!p.edit}
                 onChange={(e) => setSubmittedOn(e.target.value)}
               />
             </label>
@@ -198,7 +199,7 @@ export default function ReturnsView() {
                     type="text"
                     inputMode="decimal"
                     value={form[id]}
-                    disabled={!canWrite}
+                    disabled={!p.edit}
                     onChange={(e) => setForm({ ...form, [id]: e.target.value })}
                     onBlur={(e) => {
                       const n = parseIn(e.target.value);
@@ -209,14 +210,14 @@ export default function ReturnsView() {
               ),
             )}
           </div>
-          {canWrite ? (
+          {p.edit ? (
             <div className="bar">
               <button className="btn btn-primary" type="submit" disabled={saving || !company}>
                 {saving ? "Saving…" : `Save ${mLabel(k)} return`}
               </button>
             </div>
           ) : (
-            <div className="note">You have view-only access to this company.</div>
+            <div className="note">You do not have edit permission on this tab.</div>
           )}
         </form>
 
@@ -226,7 +227,7 @@ export default function ReturnsView() {
             <div className="note">Loading records…</div>
           ) : !have.length ? (
             <div className="note">
-              No return saved yet for this tax year.{canWrite ? " Enter the figures on the left and save." : ""}
+              No return saved yet for this tax year.{p.edit ? " Enter the figures on the left and save." : ""}
             </div>
           ) : (
             <div className="scroll">

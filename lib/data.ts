@@ -15,6 +15,7 @@ import type {
   VatReturn,
 } from "./types";
 import { yearRange } from "./format";
+import type { TabPermRow } from "./permissions";
 
 const PAGE = 1000;
 
@@ -43,15 +44,23 @@ export async function loadCompanies(sb: Db): Promise<Company[]> {
   return data ?? [];
 }
 
-export async function loadRole(sb: Db, companyId: string, userId: string): Promise<Role | null> {
-  const { data, error } = await sb
-    .from("company_members")
-    .select("role")
-    .eq("company_id", companyId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data?.role as Role) ?? null;
+/** The user's role in a company and, for members, their permission rows (one per tab they may open). */
+export async function loadAccess(
+  sb: Db,
+  companyId: string,
+  userId: string,
+): Promise<{ role: Role | null; perms: TabPermRow[] }> {
+  const [member, perms] = await Promise.all([
+    sb.from("company_members").select("role").eq("company_id", companyId).eq("user_id", userId).maybeSingle(),
+    sb
+      .from("company_member_permissions")
+      .select("tab,can_upload,can_edit,can_delete")
+      .eq("company_id", companyId)
+      .eq("user_id", userId),
+  ]);
+  if (member.error) throw new Error(member.error.message);
+  if (perms.error) throw new Error(perms.error.message);
+  return { role: (member.data?.role as Role) ?? null, perms: (perms.data ?? []) as TabPermRow[] };
 }
 
 /**

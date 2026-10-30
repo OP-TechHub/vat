@@ -34,7 +34,8 @@ const FILING_COLUMNS: ColumnSpec[] = [
 ];
 
 export default function FilingView() {
-  const { supabase, company, user, canWrite, flash } = useApp();
+  const { supabase, company, user, perm, flash } = useApp();
+  const p = perm("filing");
   const [filing, setFiling] = useState<FilingData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("");
@@ -165,7 +166,7 @@ export default function FilingView() {
       <td className={isBusy ? "opacity-60" : undefined}>
         <DocActions
           doc={r.docs[kind]}
-          canWrite={canWrite}
+          perm={p}
           busy={isBusy}
           onOpen={(d) => void openDocument(d)}
           onPick={() => pickDocument(r.month, kind)}
@@ -177,8 +178,13 @@ export default function FilingView() {
 
   return (
     <>
-      {canWrite && filing && (
-        <BulkDocumentUpload periods={periodKeys} existing={filing.documents} onDone={() => void load()} />
+      {p.upload && filing && (
+        <BulkDocumentUpload
+          periods={periodKeys}
+          existing={filing.documents}
+          canReplace={p.delete}
+          onDone={() => void load()}
+        />
       )}
 
       <input ref={docFileRef} type="file" accept={DOC_ACCEPT} className="hidden" onChange={(e) => void onDocFile(e)} />
@@ -245,8 +251,8 @@ export default function FilingView() {
               <th>Taxable period</th>
               <th>Submitted on</th>
               <th>Data uploaded</th>
-              <DocHeading title="Return uploaded" canWrite={canWrite} />
-              <DocHeading title="Acknowledgement uploaded" canWrite={canWrite} />
+              <DocHeading title="Return uploaded" perm={p} />
+              <DocHeading title="Acknowledgement uploaded" perm={p} />
             </tr>
             <FilterRow state={cf} />
           </thead>

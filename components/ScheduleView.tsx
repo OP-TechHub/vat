@@ -27,7 +27,8 @@ const COLUMNS: ColumnSpec[] = [
 ];
 
 export default function ScheduleView() {
-  const { supabase, company, months, data, loading, canWrite, user, patchScheduleLine, flash } = useApp();
+  const { supabase, company, months, data, loading, perm, user, patchScheduleLine, flash } = useApp();
+  const p = perm("schedule");
   const [month, setMonth] = useState<string>("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const cf = useColumnFilters(COLUMNS);
@@ -97,8 +98,15 @@ export default function ScheduleView() {
 
   return (
     <>
-      {canWrite && (
-        <UploadPanel kind="schedule" month={k} onMonthChange={setMonth} existingCount={countFor} onSaved={setMonth} />
+      {p.upload && (
+        <UploadPanel
+          kind="schedule"
+          month={k}
+          onMonthChange={setMonth}
+          existingCount={countFor}
+          canReplace={p.delete}
+          onSaved={setMonth}
+        />
       )}
 
       <div className="bar">
@@ -153,7 +161,7 @@ export default function ScheduleView() {
                   ) : (
                     <>
                       No schedule saved for {mLabel(k)}.
-                      {canWrite ? " Upload the month’s input schedule above." : ""}
+                      {p.upload ? " Upload the month’s input schedule above." : ""}
                     </>
                   )}
                 </td>
@@ -180,7 +188,7 @@ export default function ScheduleView() {
                         )}
                       </td>
                       <td>
-                        {canWrite ? (
+                        {p.edit ? (
                           <select
                             className="control"
                             value={r.ledger_availability ?? "none"}
@@ -199,7 +207,7 @@ export default function ScheduleView() {
                         )}
                       </td>
                       <td>
-                        {canWrite ? (
+                        {p.edit ? (
                           <ReferenceInput
                             key={r.id + ":" + (r.ledger_reference ?? "")}
                             value={r.ledger_reference ?? ""}

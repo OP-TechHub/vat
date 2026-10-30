@@ -18,6 +18,8 @@ Stack: Next.js (App Router, TypeScript), Tailwind CSS, Supabase (Postgres, Auth,
 | `supabase/migrations/0008_customs_entries.sql` | `customs_entries` (the Import Register and the export customs details) and `import_purchases` tables; customs entries fill the export reconciliation rows |
 | `supabase/migrations/0011_cusdec_items.sql` | One customs entry line per CusDec item: item number, HS code, unit and quantity, CID / PAL / SSCL / VAT amounts and MP codes; replaces a CusDec's lines on re-upload |
 | `supabase/migrations/0012_customs_documents.sql` | Three document slots per customs declaration: CusDec, other documents, all documents; kept on re-upload |
+| `supabase/migrations/0014_tab_permissions.sql` | Per-tab permissions (view, upload, edit, delete) for members; admin / member roles; upload functions that check them |
+| `lib/permissions.ts` | Tabs, permission types and helpers shared by the app shell, the screens and the Members tab |
 | `lib/reports.ts`, `lib/export.ts` | Summary and reconciliation calculations, Excel export |
 | `supabase/seed.sql` | Oceanpick 2026/27 data (608 invoices, 244 schedule lines, April return) |
 | `templates/` | Blank upload templates (also downloadable from the app) |
@@ -51,9 +53,10 @@ In the dashboard open **SQL Editor → New query**, then:
 6. Paste the whole of `supabase/migrations/0006_return_cages.sql` and click **Run**. It adds the remaining entered cages of the return (A, 0, B/2, C/2A, 3, D1, E1, J, K, J2, 8A, 11, 12, 15, 16, Q, R2, 17, 18) to `vat_returns`. Run it on existing projects too.
 7. Paste the whole of `supabase/migrations/0007_ird_status.sql` and click **Run**. It adds the `ird_status` table for the IRD status tab and lets the document table hold credit vouchers. Run it on existing projects too.
 8. Paste the whole of `supabase/migrations/0008_customs_entries.sql` and click **Run**, then `supabase/migrations/0009_vat_base.sql` (adds the "Value for VAT (customs)" column for imports) and `supabase/migrations/0010_cusdec_documents.sql` (keeps the CusDec file with its customs entry), then `supabase/migrations/0011_cusdec_items.sql` (one line per CusDec item with HS code, quantity and the CID / PAL / SSCL / VAT lines; required for the Import Register), then `supabase/migrations/0012_customs_documents.sql` (the other documents and all documents slots beside the CusDec file). It adds the `customs_entries` and `import_purchases` tables and the functions that fill the "As per customs" columns from uploaded customs entries, for the Export reconciliation and Import Register tabs. Run it on existing projects too.
-9. Paste the whole of `supabase/seed.sql` and click **Run**.
-10. Optional: paste the whole of `supabase/seed_returns.sql` and click **Run**. It loads the 65 VAT return periods from Jan 2020 to Aug 2026 (every entered cage and the submission date) for the seeded company. The same data can instead be uploaded from the VAT reconciliation tab. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
-11. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
+9. Paste the whole of `supabase/migrations/0013_customs_file_name.sql` and click **Run**, then `supabase/migrations/0014_tab_permissions.sql`. 0014 replaces the viewer / editor roles with per-tab permissions: existing viewers get view on every tab and existing editors everything, so nobody's access changes. Run it on existing projects too, and deploy the matching app version at the same time (the older app calls upload functions that 0014 locks down).
+10. Paste the whole of `supabase/seed.sql` and click **Run**.
+11. Optional: paste the whole of `supabase/seed_returns.sql` and click **Run**. It loads the 65 VAT return periods from Jan 2020 to Aug 2026 (every entered cage and the submission date) for the seeded company. The same data can instead be uploaded from the VAT reconciliation tab. It inserts the company `Oceanpick (Pvt) Ltd` with id `00000000-0000-0000-0000-000000000001` and its 2026/27 data.
+12. **Expose the schema to the API.** Open **Project Settings → API → Exposed schemas** (under "Data API"), add `vat_claims` to the list next to `public`, and save. Without this the app gets "relation not found" errors for every query. The app is hard-wired to this schema name in `lib/supabase/schema.ts`.
 
 Or, with the Supabase CLI installed and logged in:
 
@@ -84,9 +87,17 @@ from auth.users where email = 'you@example.com'
 on conflict (company_id, user_id) do update set role = excluded.role;
 ```
 
-Roles: `viewer` (read only, edit controls hidden), `editor` (uploads, inline edits, return entry), `admin` (also manages members). The database enforces this through RLS; the UI only mirrors it.
+Roles: `admin` (everything on every tab, and manages members) or `member`. A member's access is set per tab on the Members tab:
 
-After the first admin exists, further members are added from the app's **Members** tab. The person first needs a login: either they use **Create account** on the sign-in page, or you create it under **Authentication → Users**. Then an admin enters the same email and a role on the Members tab. A login on its own shows no companies and no data.
+- **No access**: the tab is hidden and its data cannot be read. The Summary and VAT reconciliation then show blanks for that data.
+- **View**: read only.
+- **Upload**: upload a month's file, or a document into an empty slot.
+- **Edit**: inline edits, rows added by hand, return figures, IRD status, and "Edit uploaded data" on Export reconciliation and Import Register.
+- **Delete**: delete rows; replace or remove documents; re-upload a month (or CusDec, or return period) that already holds data.
+
+Summary is view only; Return filing has no edit. The database enforces all of this through RLS and the `upload_*` functions; the UI only mirrors it.
+
+After the first admin exists, further members are added from the app's **Members** tab. The person first needs a login: either they use **Create account** on the sign-in page, or you create it under **Authentication → Users**. Then an admin enters the same email, a role and the member's tab permissions on the Members tab. A login on its own shows no companies and no data.
 
 Self-registration needs **Authentication → Providers → Email → Allow new users to sign up** turned on (the default). With **Confirm email** on, new users get a confirmation link before they can sign in; turn it off for an internal app where you don't want that step. To stop strangers registering at all, turn sign-ups off and create logins in the dashboard instead.
 

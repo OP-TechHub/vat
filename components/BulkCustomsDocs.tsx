@@ -79,7 +79,8 @@ export default function BulkCustomsDocs({
   entries: CustomsEntry[];
   onDone: () => void | Promise<void>;
 }) {
-  const { supabase, company, flash } = useApp();
+  const { supabase, company, perm, flash } = useApp();
+  const canReplace = perm(direction === "export" ? "exports" : "imports").delete;
   const held = useMemo(() => heldDeclarations(entries), [entries]);
   const byKey = useMemo(() => new Map(held.map((d) => [d.key, d])), [held]);
   const [kind, setKind] = useState<CustomsDocKind>("all");
@@ -150,9 +151,13 @@ export default function BulkCustomsDocs({
     for (let i = 0; i < chosen.length; i++) {
       const r = chosen[i];
       const d = byKey.get(r.key)!;
+      if (customsDoc(d.entry, kind) && !canReplace) {
+        errors.push(`${r.file.name}: the slot already holds a file and replacing it needs delete permission`);
+        continue;
+      }
       setBusy(`Uploading ${i + 1} of ${chosen.length}: ${r.file.name}`);
       try {
-        await uploadCustomsDocument(supabase, company.id, direction, d, kind, r.file, customsDoc(d.entry, kind)?.path);
+        await uploadCustomsDocument(supabase, company.id, direction, d, kind, r.file);
         done++;
       } catch (err) {
         errors.push(`${r.file.name}: ${err instanceof Error ? err.message : String(err)}`);
@@ -279,7 +284,19 @@ export default function BulkCustomsDocs({
                         </select>
                       </td>
                       <td className="whitespace-nowrap">{r.how ?? ""}</td>
-                      <td className="wrapc">{now ? <span title="Replaced on upload">{now.filename}</span> : <span className="text-muted">—</span>}</td>
+                      <td className="wrapc">
+                        {now ? (
+                          canReplace ? (
+                            <span title="Replaced on upload">{now.filename}</span>
+                          ) : (
+                            <span className="text-warn" title="Replacing needs delete permission">
+                              {now.filename} (kept: replacing needs delete permission)
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
                       <td className="wrapc">{r.note && <span className="text-warn">{r.note}</span>}</td>
                     </tr>
                   );

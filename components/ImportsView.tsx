@@ -64,14 +64,15 @@ const qty = (n: number | null | undefined) =>
  * from the CusDec PDF / spreadsheet upload above the table.
  */
 export default function ImportsView() {
-  const { supabase, company, months, data, loading, canWrite, isAdmin, reload, flash } = useApp();
+  const { supabase, company, months, data, loading, perm, reload, flash } = useApp();
+  const p = perm("imports");
   // CusDec, other documents and all documents of each declaration, shared by its item lines.
   const docs = useCustomsDocs("import", reload);
   const entries = data.importEntries;
 
-  // Admins may correct the uploaded data in place; the switch keeps the register read-only otherwise.
+  // With edit permission users may correct the uploaded data in place; the switch keeps the register read-only otherwise.
   const [editOn, setEditOn] = useState(false);
-  const editing = isAdmin && editOn;
+  const editing = p.edit && editOn;
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const [from, setFrom] = useState("");
@@ -237,8 +238,8 @@ export default function ImportsView() {
 
   return (
     <>
-      {canWrite && <CustomsUpload direction="import" />}
-      {canWrite && <BulkCustomsDocs direction="import" entries={entries} onDone={reload} />}
+      {p.upload && <CustomsUpload direction="import" />}
+      {p.upload && <BulkCustomsDocs direction="import" entries={entries} onDone={reload} />}
 
       <div className="bar">
         <label className="field">
@@ -265,7 +266,7 @@ export default function ImportsView() {
         </label>
         <CustomsSearch value={q} onChange={setQ} />
         <ClearFilters state={cf} />
-        {isAdmin && <EditSwitch on={editOn} onChange={setEditOn} />}
+        {p.edit && <EditSwitch on={editOn} onChange={setEditOn} />}
         <span className="note pb-1.5">
           {cusdecs(all)} CusDec{cusdecs(all) === 1 ? "" : "s"}, {all.length} item line{all.length === 1 ? "" : "s"} · value for VAT{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.vat_base ?? 0))}</span>
@@ -333,7 +334,7 @@ export default function ImportsView() {
               <th className="num">VAT</th>
               <th>Type</th>
               <th>Code</th>
-              <CustomsDocHeadings canWrite={canWrite} />
+              <CustomsDocHeadings perm={p} />
             </tr>
             <FilterRow state={cf} />
           </thead>
@@ -354,7 +355,7 @@ export default function ImportsView() {
                   ) : (
                     <>
                       No import customs entries for {lo === hi ? mLabel(lo) : `${mLabel(lo)} to ${mLabel(hi)}`}.
-                      {canWrite ? " Upload the CusDec PDFs or a spreadsheet of entries above." : ""}
+                      {p.upload ? " Upload the CusDec PDFs or a spreadsheet of entries above." : ""}
                     </>
                   )}
                 </td>
@@ -380,8 +381,8 @@ export default function ImportsView() {
         lines. Each CusDec keeps three files, whether its lines came from the PDFs or a spreadsheet: the CusDec itself,
         the other documents (invoice, packing list, bill of lading) and all documents as one bundle; upload or open them
         in the Documents columns.
-        {isAdmin &&
-          " Admins can correct the uploaded data with “Edit uploaded data”: every column of every item line, with a declaration column (CusDec, date, month, invoice, supplier, currency, rate, invoice value) saved to all lines of its CusDec. Uploading that CusDec again replaces the corrections."}
+        {p.edit &&
+          " With edit permission the uploaded data can be corrected with “Edit uploaded data”: every column of every item line, with a declaration column (CusDec, date, month, invoice, supplier, currency, rate, invoice value) saved to all lines of its CusDec. Uploading that CusDec again replaces the corrections."}
       </div>
     </>
   );

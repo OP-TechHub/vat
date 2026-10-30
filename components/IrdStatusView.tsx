@@ -45,7 +45,8 @@ const IRD_COLUMNS: ColumnSpec[] = [
 ];
 
 export default function IrdStatusView() {
-  const { supabase, company, user, canWrite, flash } = useApp();
+  const { supabase, company, user, perm, flash } = useApp();
+  const p = perm("ird_status");
   const [data, setData] = useState<IrdStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("");
@@ -293,7 +294,7 @@ export default function IrdStatusView() {
               <th>Status</th>
               <th>Date of credit voucher</th>
               <th className="num">Value of credit voucher</th>
-              <DocHeading title="Credit voucher" canWrite={canWrite} />
+              <DocHeading title="Credit voucher" perm={p} />
             </tr>
             <FilterRow state={cf} />
           </thead>
@@ -326,7 +327,7 @@ export default function IrdStatusView() {
                         {r.hasData ? fmt(r.inputLessPaid) : ""}
                       </td>
                       <td>
-                        {canWrite ? (
+                        {p.edit ? (
                           <select
                             className="control"
                             value={r.status ?? ""}
@@ -346,7 +347,7 @@ export default function IrdStatusView() {
                         )}
                       </td>
                       <td>
-                        {canWrite && received ? (
+                        {p.edit && received ? (
                           <input
                             className="control"
                             type="date"
@@ -360,7 +361,7 @@ export default function IrdStatusView() {
                         )}
                       </td>
                       <td className="num">
-                        {canWrite && received ? (
+                        {p.edit && received ? (
                           <ValueInput
                             key={r.month + ":" + (r.voucherValue ?? "")}
                             value={fmtIn(r.voucherValue)}
@@ -375,7 +376,7 @@ export default function IrdStatusView() {
                       <td>
                         <DocActions
                           doc={r.voucher}
-                          canWrite={canWrite && (received || !!r.voucher)}
+                          perm={received ? p : { ...p, upload: false }}
                           busy={isBusy}
                           yes="Attached"
                           no={received ? "Not attached" : "—"}

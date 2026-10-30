@@ -14,7 +14,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Db } from "@/lib/supabase/schema";
 import { createClient } from "@/lib/supabase/client";
-import { loadCustomsEntries, loadExportSales, loadInvoices, loadReturns, loadRole, loadScheduleLines } from "@/lib/data";
+import { loadAccess, loadCustomsEntries, loadExportSales, loadInvoices, loadReturns, loadScheduleLines } from "@/lib/data";
+import { NO_ACCESS, TABS, permMap, tabOfPath, type Perm, type TabKey, type TabPermRow } from "@/lib/permissions";
 import { monthsOf, taxYearOf, yearLabel } from "@/lib/format";
 import { pm } from "@/lib/reports";
 import { exportWorkbook } from "@/lib/export";
@@ -43,8 +44,9 @@ export interface AppState {
   /** Month keys of the selected tax year, April to March. */
   months: string[];
   role: Role | null;
-  canWrite: boolean;
   isAdmin: boolean;
+  /** What the user may do on a tab of the selected company. */
+  perm: (tab: TabKey) => Perm;
   data: YearData;
   /** Only the invoices posted within the selected tax year. */
   yearInvoices: Invoice[];
@@ -78,17 +80,7 @@ const FIRST_TAX_YEAR = 2019;
 const isMissingTable = (e: unknown) =>
   e instanceof Error && /schema cache|does not exist|relation .* not found/i.test(e.message);
 
-const TABS: { href: string; label: string; admin?: boolean }[] = [
-  { href: "/summary", label: "Summary" },
-  { href: "/invoices", label: "Invoice listing" },
-  { href: "/schedule", label: "IRD input schedule" },
-  { href: "/exports", label: "Export reconciliation" },
-  { href: "/imports", label: "Import Register" },
-  { href: "/returns", label: "VAT reconciliation" },
-  { href: "/filing", label: "Return filing" },
-  { href: "/ird-status", label: "IRD status" },
-  { href: "/members", label: "Members", admin: true },
-];
+const MEMBERS_TAB = { href: "/members", label: "Members" };
 
 export default function AppShell({
   user,
@@ -108,6 +100,7 @@ export default function AppShell({
   const [companyId, setCompanyId] = useState<string>(companies[0]?.id ?? "");
   const [year, setYearState] = useState<number>(currentTaxYear());
   const [role, setRole] = useState<Role | null>(null);
+  const [permRows, setPermRows] = useState<TabPermRow[]>([]);
   const [data, setData] = useState<YearData>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(loadError);
@@ -148,6 +141,7 @@ export default function AppShell({
     if (!companyId) {
       setData(EMPTY);
       setRole(null);
+      setPermRows([]);
       setLoading(false);
       return;
     }
@@ -166,17 +160,26 @@ export default function AppShell({
           }
           throw e;
         });
-      const [invoices, schedule, returns, exports, importEntries, r] = await Promise.all([
+      // Tables the user has no access to come back empty (row level security), which is what the
+      // Summary and VAT reconciliation should then show for them.
+      const [invoices, schedule, returns, exports, importEntries, access] = await Promise.all([
         loadInvoices(supabase, companyId, year),
         loadScheduleLines(supabase, companyId, year),
         loadReturns(supabase, companyId, year),
         optional(loadExportSales(supabase, companyId, year), "0004_export_sales.sql"),
         optional(loadCustomsEntries(supabase, "import", companyId), "0008_customs_entries.sql"),
-        loadRole(supabase, companyId, user.id),
+        loadAccess(supabase, companyId, user.id).catch((e: unknown) => {
+          if (isMissingTable(e)) {
+            missing.push("0014_tab_permissions.sql");
+            return { role: null, perms: [] };
+          }
+          throw e;
+        }),
       ]);
       if (id !== reqId.current) return;
       setData({ invoices, schedule, returns, exports, importEntries });
-      setRole(r);
+      setRole(access.role);
+      setPermRows(access.perms);
       if (missing.length)
         setError(
           `This Supabase project is missing newer database objects. Run ${missing.join(", ")} from supabase/migrations in the SQL Editor (see README step 2). Until then the affected tab shows no data.`,
@@ -218,8 +221,12 @@ export default function AppShell({
   }, []);
 
   const company = companies.find((c) => c.id === companyId) ?? null;
-  const canWrite = role === "editor" || role === "admin";
   const isAdmin = role === "admin";
+  const perms = useMemo(() => permMap(isAdmin, permRows), [isAdmin, permRows]);
+  const perm = useCallback((tab: TabKey) => perms[tab] ?? NO_ACCESS, [perms]);
+  const visibleTabs = TABS.filter((t) => perms[t.key].view);
+  const currentTab = tabOfPath(pathname);
+  const blocked = !loading && !!company && currentTab != null && !perms[currentTab].view;
   const months = useMemo(() => monthsOf(year), [year]);
   const yearInvoices = useMemo(() => data.invoices.filter((r) => months.includes(pm(r))), [data.invoices, months]);
 
@@ -246,8 +253,8 @@ export default function AppShell({
     setYear,
     months,
     role,
-    canWrite,
     isAdmin,
+    perm,
     data,
     yearInvoices,
     loading,
@@ -317,7 +324,7 @@ export default function AppShell({
         </header>
 
         <nav className="flex flex-wrap gap-1 border-b border-line" aria-label="Sections">
-          {TABS.filter((t) => !t.admin || isAdmin).map((t) => (
+          {[...visibleTabs, ...(isAdmin ? [MEMBERS_TAB] : [])].map((t) => (
             <Link
               key={t.href}
               href={t.href}
@@ -336,7 +343,27 @@ export default function AppShell({
           </div>
         )}
 
-        <main className="flex flex-col gap-4">{children}</main>
+        <main className="flex flex-col gap-4">
+          {blocked ? (
+            <div className="panel note">
+              You do not have access to this tab for {company?.name}.
+              {visibleTabs.length ? (
+                <>
+                  {" "}
+                  Go to{" "}
+                  <Link href={visibleTabs[0].href} className="underline">
+                    {visibleTabs[0].label}
+                  </Link>
+                  .
+                </>
+              ) : (
+                " Ask a company admin to give you access."
+              )}
+            </div>
+          ) : (
+            children
+          )}
+        </main>
       </div>
     </Ctx.Provider>
   );

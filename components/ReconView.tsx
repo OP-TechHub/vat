@@ -104,7 +104,8 @@ export default function ReconView({
   /** Called with the re-read row after an inline edit. */
   onPatched: (row: ExportSale) => void;
 }) {
-  const { supabase, company, months, loading, canWrite, isAdmin, user, reload, flash } = useApp();
+  const { supabase, company, months, loading, perm, user, reload, flash } = useApp();
+  const p = perm(direction === "export" ? "exports" : "imports");
   const isImport = direction === "import";
   const t = TEXT[direction];
   const customsCols = isImport ? 9 : 7;
@@ -114,9 +115,9 @@ export default function ReconView({
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  // Admins may correct the uploaded report columns and the customs entries without a report invoice.
+  // With edit permission the uploaded report columns and the customs entries without a report invoice may be corrected.
   const [editOn, setEditOn] = useState(false);
-  const editing = isAdmin && editOn;
+  const editing = (p.edit || p.delete) && editOn;
 
   const countFor = (m: string) => rows0.filter((r) => sm(r) === m).length;
 
@@ -472,13 +473,14 @@ export default function ReconView({
 
   return (
     <>
-      {canWrite && (
+      {p.upload && (
         <>
           <UploadPanel
             kind={direction}
             month={upMonth || months[0]}
             onMonthChange={setUpMonth}
             existingCount={countFor}
+            canReplace={p.delete}
             onSaved={(m) => {
               setFrom(m);
               setTo(m);
@@ -514,7 +516,7 @@ export default function ReconView({
         </label>
         <CustomsSearch value={q} onChange={setQ} />
         <ClearFilters state={cf} />
-        {isAdmin && <EditSwitch on={editOn} onChange={setEditOn} />}
+        {(p.edit || p.delete) && <EditSwitch on={editOn} onChange={setEditOn} />}
         <span className="note pb-1.5">
           {all.length} {t.invoiceNoun} · {isImport ? "ledger value" : "net sales"}{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.net_sales))}</span>
@@ -533,7 +535,7 @@ export default function ReconView({
         </span>
       </div>
 
-      {canWrite && (
+      {p.edit && (
         <div className="bar">
           <AddReconRow
             direction={direction}
@@ -587,7 +589,7 @@ export default function ReconView({
               <th className="num">Short shipment (3)</th>
               <th className="num">{isImport ? "Reversed in the month (4)" : "Sales reversed in the month (4)"}</th>
               <th>Updated in customs report</th>
-              <CustomsDocHeadings canWrite={canWrite} />
+              <CustomsDocHeadings perm={p} />
             </tr>
             <FilterRow state={cf} />
           </thead>
@@ -608,7 +610,7 @@ export default function ReconView({
                   ) : (
                     <>
                       No {t.noun} saved for {lo === hi ? mLabel(lo) : `${mLabel(lo)} to ${mLabel(hi)}`}.
-                      {canWrite ? ` Upload a month’s ${t.report} above, or add invoices by hand.` : ""}
+                      {p.upload ? ` Upload a month’s ${t.report} above, or add invoices by hand.` : ""}
                     </>
                   )}
                 </td>
@@ -623,8 +625,9 @@ export default function ReconView({
                     docCell={docCell}
                     entryFor={(inv) => entryByInvoice.get(norm(inv))}
                     isImport={isImport}
-                    canWrite={canWrite}
-                    editing={editing}
+                    canWrite={p.edit}
+                    editing={editing && p.edit}
+                    deleting={editing && p.delete}
                     busyId={busyId}
                     text={text}
                     numeric={numeric}
@@ -653,8 +656,8 @@ export default function ReconView({
         the report by hand. Customs value is invoice value ×
         customs rate and exchange difference (1) is customs value less {isImport ? "ledger value" : "net sales"}.
         Re-uploading a month keeps customs details already held for the same invoice number.
-        {isAdmin &&
-          ` Admins can correct the uploaded data with “Edit uploaded data”: every ${t.report} column of each invoice, its month included, and every customs column of an entry without a ${isImport ? "purchase" : "sales"} invoice yet (correcting its invoice number matches it to the report; a summed amount of a CusDec with several items is adjusted on its first item line). Re-uploading the month or the CusDec replaces the corrections.`}
+        {p.edit &&
+          ` With edit permission the uploaded data can be corrected with “Edit uploaded data”: every ${t.report} column of each invoice, its month included, and every customs column of an entry without a ${isImport ? "purchase" : "sales"} invoice yet (correcting its invoice number matches it to the report; a summed amount of a CusDec with several items is adjusted on its first item line). Re-uploading the month or the CusDec replaces the corrections.`}
       </div>
     </>
   );
@@ -668,6 +671,7 @@ function GroupRows({
   isImport,
   canWrite,
   editing,
+  deleting,
   busyId,
   text,
   numeric,
@@ -688,8 +692,10 @@ function GroupRows({
   entryFor: (invoiceNo: string) => CustomsEntry | undefined;
   isImport: boolean;
   canWrite: boolean;
-  /** An admin is correcting the uploaded data. */
+  /** The uploaded data is being corrected (edit permission, switch on). */
   editing: boolean;
+  /** Delete buttons are shown (delete permission, switch on). */
+  deleting: boolean;
   busyId: string | null;
   text: (row: ExportSale, field: keyof ExportEditable) => (v: string) => void;
   numeric: (row: ExportSale, field: keyof ExportEditable, places?: number) => (v: string) => void;
@@ -726,7 +732,7 @@ function GroupRows({
             />
           );
         };
-        /** A report column: an input while an admin edits, else the shown value. */
+        /** A report column: an input while the uploaded data is being corrected, else the shown value. */
         const report = (field: keyof ExportReportEditable, shown: ReactNode, kind: "text" | "num", places = 2, width = "w-[110px]") => {
           if (!editing) return shown;
           const value = r[field] == null ? "" : String(r[field]);
@@ -747,7 +753,7 @@ function GroupRows({
             <td className="wrapc">{cusdecFileName(entryFor(r.invoice_no)) || <span className="text-muted">—</span>}</td>
             <td>
               {report("invoice_no", r.invoice_no, "text")}
-              {editing && (
+              {deleting && (
                 <button
                   type="button"
                   className="btn ml-1"
@@ -841,7 +847,7 @@ function GroupRows({
           ) : (
             "—"
           );
-        /** An amount summed over the declaration's item lines: an input while an admin edits, else the sum. */
+        /** An amount summed over the declaration's item lines: an input while the uploaded data is being corrected, else the sum. */
         const totalCell = (field: OrphanTotal, width: string) => {
           if (!editing) return fmt(o[field]);
           const value = o[field] == null ? "" : String(o[field]);
@@ -857,7 +863,7 @@ function GroupRows({
             />
           );
         };
-        /** A declaration field of the customs entry: an input while an admin edits, else the shown value. */
+        /** A declaration field of the customs entry: an input while the uploaded data is being corrected, else the shown value. */
         const entryCell = (field: keyof CustomsEditable, shown: ReactNode, kind: "text" | "num", places = 2, width = "w-[100px]") => {
           if (!editing) return shown;
           const value = e[field] == null ? "" : String(e[field]);

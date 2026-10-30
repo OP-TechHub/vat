@@ -29,37 +29,38 @@ const COPY: Record<UploadKind, { title: string; note: string; rpc: string }> = {
     title: "Upload a month’s ledger invoice list",
     note:
       "Excel or CSV with columns Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY). Only rows posted in the chosen month are taken. Original-invoice marks and claimed-month overrides already entered are kept.",
-    rpc: "replace_ledger_month",
+    rpc: "upload_ledger_month",
   },
   schedule: {
     title: "Upload a month’s IRD input schedule",
     note:
       "Excel or CSV with columns Serial No, Invoice Date, Tax Invoice No, Supplier’s TIN, Name of the Supplier, Description, Value of purchase, VAT Amount. If the file has a Month column, only the chosen month’s rows are taken. A blank VAT Amount is taken as 18% of the value.",
-    rpc: "replace_schedule_month",
+    rpc: "upload_schedule_month",
   },
   export: {
     title: "Upload a month’s export sales report",
     note:
       "Excel or CSV with columns Invoice No, Month, Amount FC (FOB) USD / EUR, Ex.rate, Net Sales (A). The customs columns (Cusdec No, Date, Month, Currency Type, Ex. Rate Custom LKR, Invoice Value as Per USD / EUR, Custom Value) and Short Shipment, Sales Reversed and Updated in Custom Report may be included or filled in on the table afterwards. If the file has a Month column, only the chosen month’s rows are taken. Customs details already entered are kept where the file leaves them blank.",
-    rpc: "replace_export_month",
+    rpc: "upload_export_month",
   },
   import: {
     title: "Upload a month’s import purchase report",
     note:
       "Excel or CSV with columns Invoice No, Month, Amount FC (CIF) USD / EUR, Ex.rate, Ledger Value (A). The customs columns and VAT as per Customs may be included, filled in on the table, or filled automatically from uploaded import customs entries. If the file has a Month column, only the chosen month’s rows are taken. Customs details already entered are kept where the file leaves them blank.",
-    rpc: "replace_import_month",
+    rpc: "upload_import_month",
   },
 };
 
 /**
  * Pick a month and a file, preview what was parsed, then confirm to replace that month's rows.
- * Rendered only for editors and admins.
+ * Rendered only with upload permission; replacing a month that already has rows also needs delete.
  */
 export default function UploadPanel({
   kind,
   month,
   onMonthChange,
   existingCount,
+  canReplace,
   onSaved,
 }: {
   kind: UploadKind;
@@ -67,6 +68,8 @@ export default function UploadPanel({
   onMonthChange: (m: string) => void;
   /** Rows already held for a month, shown in the preview. */
   existingCount: (month: string) => number;
+  /** Delete permission: a month already holding rows may be replaced. */
+  canReplace: boolean;
   onSaved?: (month: string) => void;
 }) {
   const { supabase, company, year, reload, flash } = useApp();
@@ -102,8 +105,10 @@ export default function UploadPanel({
     rd.readAsArrayBuffer(file);
   }
 
+  const blocked = !!pending && !canReplace && existingCount(pending.month) > 0;
+
   async function save() {
-    if (!pending || !company) return;
+    if (!pending || !company || blocked) return;
     setSaving(true);
     const { error } = await supabase.rpc(COPY[kind].rpc, {
       p_company: company.id,
@@ -167,8 +172,14 @@ export default function UploadPanel({
       {pending && (
         <>
           <div className="msg">{pending.text}</div>
+          {blocked && (
+            <div className="msg msg-err">
+              {mLabel(pending.month)} already holds {existingCount(pending.month)} rows. Replacing them needs delete
+              permission on this tab; ask a company admin.
+            </div>
+          )}
           <div className="bar">
-            <button className="btn btn-primary" type="button" onClick={save} disabled={saving}>
+            <button className="btn btn-primary" type="button" onClick={save} disabled={saving || blocked}>
               {saving ? "Saving…" : `Save ${pending.rows.length} rows to ${mLabel(pending.month)}`}
             </button>
             <button className="btn" type="button" onClick={cancel} disabled={saving}>
