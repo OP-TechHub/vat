@@ -126,7 +126,7 @@ export default function FilingView() {
     const { month, kind } = target;
     setBusy(month + ":" + kind);
     try {
-      await uploadDocument(supabase, company.id, user.id, month, kind, file, rows.find((r) => r.month === month)?.docs[kind]);
+      await uploadDocument(supabase, company.id, user.id, month, kind, file);
       flash(`${DOC_LABEL[kind]} for ${mLabel(month)} uploaded.`);
       await load();
     } catch (err) {

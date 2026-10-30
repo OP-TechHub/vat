@@ -15,7 +15,7 @@ import {
 import type { Perm } from "@/lib/permissions";
 import type { CustomsEntry, ReconDirection } from "@/lib/types";
 
-/** Filter boxes of the three document columns. */
+/** Filter boxes of the document columns. */
 export const DOC_FILTER_COLUMNS: ColumnSpec[] = CUSTOMS_DOC_KINDS.map(({ kind, label }, i) => ({
   key: "doc_" + kind,
   label: `${label} (held / none / file name)`,
@@ -69,7 +69,7 @@ export function CustomsSearch({ value, onChange }: { value: string; onChange: (v
   );
 }
 
-/** Headings of the three document columns. */
+/** Headings of the document columns. */
 export function CustomsDocHeadings({ perm }: { perm: Perm }) {
   return (
     <>
@@ -86,8 +86,8 @@ interface HeldDoc {
 }
 
 /**
- * Open / Upload / Replace / Remove for the CusDec, other documents and all documents of a customs
- * declaration. `cells(entry)` gives the three table cells of a row; `input` is the hidden file picker
+ * Open / Upload / Replace / Remove for the CusDec, commercial invoice, other documents and all documents of a
+ * customs declaration. `cells(entry)` gives the document table cells of a row; `input` is the hidden file picker
  * to render once. `onChanged` runs after a file is kept or removed.
  */
 export function useCustomsDocs(direction: ReconDirection, onChanged: () => void | Promise<void>) {

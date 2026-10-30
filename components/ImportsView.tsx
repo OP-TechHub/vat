@@ -16,6 +16,7 @@ import {
 } from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, sum } from "@/lib/format";
+import { CUSTOMS_DOC_KINDS } from "@/lib/customsDocs";
 import { customsEntryMonth } from "@/lib/matchDocuments";
 import { updateCustomsEntry } from "@/lib/data";
 import type { CustomsEditable, CustomsEntry } from "@/lib/types";
@@ -52,7 +53,7 @@ const COLUMNS: ColumnSpec[] = [
   ...DOC_FILTER_COLUMNS,
 ];
 /** Columns of the register table, for the empty / loading rows. */
-const COLS = 28;
+const COLS = 25 + CUSTOMS_DOC_KINDS.length;
 
 /** Quantity with up to three decimals, without trailing zeros. */
 const qty = (n: number | null | undefined) =>
@@ -66,7 +67,7 @@ const qty = (n: number | null | undefined) =>
 export default function ImportsView() {
   const { supabase, company, months, data, loading, perm, reload, flash } = useApp();
   const p = perm("imports");
-  // CusDec, other documents and all documents of each declaration, shared by its item lines.
+  // CusDec, commercial invoice, other documents and all documents of each declaration, shared by its item lines.
   const docs = useCustomsDocs("import", reload);
   const entries = data.importEntries;
 
@@ -232,7 +233,7 @@ export default function ImportsView() {
       <td></td>
       <td className="num">{fmt(sum(rows, (r) => r.vat_base ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.vat_amount ?? 0))}</td>
-      <td colSpan={5}></td>
+      <td colSpan={2 + CUSTOMS_DOC_KINDS.length}></td>
     </tr>
   );
 
@@ -273,7 +274,9 @@ export default function ImportsView() {
           {" · "}VAT as per customs{" "}
           <span className="font-mono tabular-nums">{fmt(sum(all, (r) => r.vat_amount ?? 0))}</span>
           {" · "}
-          {cusdecs(all.filter((r) => r.doc_path))} with the CusDec held · {cusdecs(all.filter((r) => r.other_doc_path))} with other
+          {cusdecs(all.filter((r) => r.doc_path))} with the CusDec held ·{" "}
+          {cusdecs(all.filter((r) => r.invoice_doc_path))} with the commercial invoice ·{" "}
+          {cusdecs(all.filter((r) => r.other_doc_path))} with other
           documents · {cusdecs(all.filter((r) => r.all_doc_path))} with all documents
           {undated.length > 0 && (
             <>
@@ -304,7 +307,7 @@ export default function ImportsView() {
               <th colSpan={10} className="text-center border-l border-line" style={{ position: "static" }}>
                 Taxes as per customs (amount and MP code)
               </th>
-              <th colSpan={3} className="text-center border-l border-line" style={{ position: "static" }}>
+              <th colSpan={CUSTOMS_DOC_KINDS.length} className="text-center border-l border-line" style={{ position: "static" }}>
                 Documents
               </th>
             </tr>
@@ -378,8 +381,8 @@ export default function ImportsView() {
         repeated on each line. Customs value is the item’s statistical value (box 46). The tax columns are the CID, PAL,
         SSCL and VAT lines of the item’s tax table with their MP codes; Value for VAT is the VAT line’s tax base and feeds
         the imports check on the VAT reconciliation tab. Uploading the same CusDec and invoice number again replaces its
-        lines. Each CusDec keeps three files, whether its lines came from the PDFs or a spreadsheet: the CusDec itself,
-        the other documents (invoice, packing list, bill of lading) and all documents as one bundle; upload or open them
+        lines. Each CusDec keeps four files, whether its lines came from the PDFs or a spreadsheet: the CusDec itself,
+        the commercial invoice, the other documents (packing list, bill of lading) and all documents as one bundle; upload or open them
         in the Documents columns.
         {p.edit &&
           " With edit permission the uploaded data can be corrected with “Edit uploaded data”: every column of every item line, with a declaration column (CusDec, date, month, invoice, supplier, currency, rate, invoice value) saved to all lines of its CusDec. Uploading that CusDec again replaces the corrections."}

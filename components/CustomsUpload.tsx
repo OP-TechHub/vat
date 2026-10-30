@@ -357,7 +357,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
           : " Each entry is matched to the sales row with the same invoice number and its “As per customs” columns are filled in; entries are kept, so a month uploaded later is filled too."}{" "}
         The same CusDec and invoice number uploaded again replaces its earlier lines, which needs delete permission on this
         tab as well as upload. Before saving, attach the CusDec,
-        the other documents and all documents (the full bundle) to each CusDec in the Documents column, for spreadsheet
+        the commercial invoice, the other documents and all documents (the full bundle) to each CusDec in the Documents column, for spreadsheet
         lines too; a CusDec PDF is kept as the CusDec, or as all documents when it is a bundle. Files can also be added
         later from the table below.
       </div>

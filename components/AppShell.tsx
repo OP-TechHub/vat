@@ -16,6 +16,8 @@ import type { Db } from "@/lib/supabase/schema";
 import { createClient } from "@/lib/supabase/client";
 import { loadAccess, loadCustomsEntries, loadExportSales, loadInvoices, loadReturns, loadScheduleLines } from "@/lib/data";
 import { NO_ACCESS, TABS, permMap, tabOfPath, type Perm, type TabKey, type TabPermRow } from "@/lib/permissions";
+import { runHousekeeping } from "@/lib/changeLog";
+import { BUCKET } from "@/lib/documents";
 import { monthsOf, taxYearOf, yearLabel } from "@/lib/format";
 import { pm } from "@/lib/reports";
 import { exportWorkbook } from "@/lib/export";
@@ -80,7 +82,11 @@ const FIRST_TAX_YEAR = 2019;
 const isMissingTable = (e: unknown) =>
   e instanceof Error && /schema cache|does not exist|relation .* not found/i.test(e.message);
 
-const MEMBERS_TAB = { href: "/members", label: "Members" };
+/** Tabs only admins see. */
+const ADMIN_TABS = [
+  { href: "/members", label: "Members" },
+  { href: "/log", label: "Log" },
+];
 
 export default function AppShell({
   user,
@@ -227,6 +233,15 @@ export default function AppShell({
   const visibleTabs = TABS.filter((t) => perms[t.key].view);
   const currentTab = tabOfPath(pathname);
   const blocked = !loading && !!company && currentTab != null && !perms[currentTab].view;
+
+  // Once per company and session, an admin's browser deletes archived documents whose 30 days are up
+  // and log entries older than 5 years. Failures are ignored; the next admin visit tries again.
+  const housekept = useRef(new Set<string>());
+  useEffect(() => {
+    if (!isAdmin || !companyId || housekept.current.has(companyId)) return;
+    housekept.current.add(companyId);
+    runHousekeeping(supabase, companyId, BUCKET).catch(() => {});
+  }, [isAdmin, companyId, supabase]);
   const months = useMemo(() => monthsOf(year), [year]);
   const yearInvoices = useMemo(() => data.invoices.filter((r) => months.includes(pm(r))), [data.invoices, months]);
 
@@ -324,7 +339,7 @@ export default function AppShell({
         </header>
 
         <nav className="flex flex-wrap gap-1 border-b border-line" aria-label="Sections">
-          {[...visibleTabs, ...(isAdmin ? [MEMBERS_TAB] : [])].map((t) => (
+          {[...visibleTabs, ...(isAdmin ? ADMIN_TABS : [])].map((t) => (
             <Link
               key={t.href}
               href={t.href}

@@ -63,7 +63,7 @@ export default function ReturnDocuments({ month, onChange }: { month: string; on
     if (!file || !kind || !company) return;
     setBusy(kind);
     try {
-      await uploadDocument(supabase, company.id, user.id, month, kind, file, docs?.find((d) => d.kind === kind));
+      await uploadDocument(supabase, company.id, user.id, month, kind, file);
       flash(`${DOC_LABEL[kind]} for ${mLabel(month)} uploaded.`);
       await load();
       onChange?.();

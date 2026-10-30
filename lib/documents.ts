@@ -2,7 +2,7 @@
  * Filed return and IRD acknowledgement documents, one of each per period, kept in the private
  * "vat-claims" storage bucket under <company_id>/<YYYY-MM>/<kind>/<filename> and listed in
  * return_documents. Storage policies follow the tab permissions (migration 0014): a new document needs
- * upload, replacing or removing one needs delete.
+ * upload, replacing or removing one needs delete. Files are never overwritten or deleted by the app.
  */
 import type { Db } from "./supabase/schema";
 import type { DocumentKind, ReturnDocument } from "./types";
@@ -29,7 +29,19 @@ export async function loadMonthDocuments(sb: Db, companyId: string, month: strin
   return (data ?? []) as ReturnDocument[];
 }
 
-/** Upload (or replace) a period's document and record it. */
+/**
+ * Storage name for an uploaded file: unique per upload, so a replaced or removed file is never overwritten
+ * and stays available to the change log's undo until housekeeping deletes it 30 days later.
+ */
+export function storedName(file: File): string {
+  const safe = file.name.replace(/[^\w.\-()\s]+/g, "_").trim().slice(-120) || "file";
+  return `${Date.now()}_${safe}`;
+}
+
+/**
+ * Upload (or replace) a period's document and record it. The file previously held stays in storage
+ * (migration 0015 archives it); replacing the register row needs delete permission.
+ */
 export async function uploadDocument(
   sb: Db,
   companyId: string,
@@ -37,16 +49,9 @@ export async function uploadDocument(
   month: string,
   kind: DocumentKind,
   file: File,
-  existing?: ReturnDocument | null,
 ): Promise<ReturnDocument> {
-  const safe = file.name.replace(/[^\w.\-()\s]+/g, "_").slice(-120);
-  const path = `${companyId}/${month}/${kind}/${safe}`;
-  if (existing && existing.path !== path) {
-    const rm = await sb.storage.from(BUCKET).remove([existing.path]);
-    if (rm.error) throw new Error(rm.error.message);
-  }
-  // Overwriting a file counts as replacing it (delete permission), so only a replacement may overwrite.
-  const up = await sb.storage.from(BUCKET).upload(path, file, { upsert: !!existing, contentType: file.type || undefined });
+  const path = `${companyId}/${month}/${kind}/${storedName(file)}`;
+  const up = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined });
   if (up.error) throw new Error(up.error.message);
   const row: ReturnDocument = {
     company_id: companyId,
@@ -69,10 +74,11 @@ export async function documentUrl(sb: Db, doc: ReturnDocument, seconds = 300): P
   return data.signedUrl;
 }
 
-/** Delete a document from storage and from the register. */
+/**
+ * Remove a document from the register. The file stays in storage for 30 days so the removal can be
+ * undone from the change log; housekeeping deletes it after that.
+ */
 export async function removeDocument(sb: Db, doc: ReturnDocument): Promise<void> {
-  const rm = await sb.storage.from(BUCKET).remove([doc.path]);
-  if (rm.error) throw new Error(rm.error.message);
   const { error } = await sb
     .from("return_documents")
     .delete()

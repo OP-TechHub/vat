@@ -268,7 +268,11 @@ export interface CustomsEntry {
   doc_path?: string | null;
   doc_name?: string | null;
   doc_uploaded_at?: string | null;
-  /** Other documents of the declaration (invoice, packing list, bill of lading...), when kept. */
+  /** The commercial invoice of the declaration, when kept. */
+  invoice_doc_path?: string | null;
+  invoice_doc_name?: string | null;
+  invoice_doc_uploaded_at?: string | null;
+  /** Other documents of the declaration (packing list, bill of lading...), when kept. */
   other_doc_path?: string | null;
   other_doc_name?: string | null;
   other_doc_uploaded_at?: string | null;
@@ -289,6 +293,9 @@ export type CustomsEditable = Omit<
   | "doc_path"
   | "doc_name"
   | "doc_uploaded_at"
+  | "invoice_doc_path"
+  | "invoice_doc_name"
+  | "invoice_doc_uploaded_at"
   | "other_doc_path"
   | "other_doc_name"
   | "other_doc_uploaded_at"

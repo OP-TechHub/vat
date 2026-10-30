@@ -178,7 +178,7 @@ export default function IrdStatusView() {
     if (!file || !month || !company) return;
     setBusy(month);
     try {
-      await uploadDocument(supabase, company.id, user.id, month, "credit_voucher", file, rows.find((r) => r.month === month)?.voucher);
+      await uploadDocument(supabase, company.id, user.id, month, "credit_voucher", file);
       flash(`Credit voucher for ${mLabel(month)} uploaded.`);
       await load();
     } catch (err) {

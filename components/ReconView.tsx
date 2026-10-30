@@ -27,6 +27,7 @@ import {
   updateCustomsEntry,
   updateReconReport,
 } from "@/lib/data";
+import { CUSTOMS_DOC_KINDS } from "@/lib/customsDocs";
 import { customsEntryMonth } from "@/lib/matchDocuments";
 import type {
   CurrencyType,
@@ -109,7 +110,7 @@ export default function ReconView({
   const isImport = direction === "import";
   const t = TEXT[direction];
   const customsCols = isImport ? 9 : 7;
-  const COLS = 13 + customsCols;
+  const COLS = 10 + customsCols + CUSTOMS_DOC_KINDS.length;
 
   const [upMonth, setUpMonth] = useState("");
   const [from, setFrom] = useState("");
@@ -217,7 +218,7 @@ export default function ReconView({
     [rows0, entryByInvoice, cf.apply, q],
   );
 
-  // CusDec, other documents and all documents of the customs entry carrying the row's invoice number.
+  // CusDec, commercial invoice, other documents and all documents of the customs entry carrying the row's invoice number.
   const docs = useCustomsDocs(direction, () => setDocTick((n) => n + 1));
   /** The three document cells for a row: dashes without a customs entry, else the document actions. */
   const docCell = docs.cells;
@@ -467,7 +468,7 @@ export default function ReconView({
       <td className="num">{fmt(sum(rows, (r) => exchangeDifference(r) ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.short_shipment ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.sales_reversed ?? 0))}</td>
-      <td colSpan={4}></td>
+      <td colSpan={1 + CUSTOMS_DOC_KINDS.length}></td>
     </tr>
   );
 
@@ -565,7 +566,7 @@ export default function ReconView({
               <th colSpan={4} className="text-center border-l border-line" style={{ position: "static" }}>
                 Differences
               </th>
-              <th colSpan={3} className="text-center border-l border-line" style={{ position: "static" }}>
+              <th colSpan={CUSTOMS_DOC_KINDS.length} className="text-center border-l border-line" style={{ position: "static" }}>
                 Documents
               </th>
             </tr>

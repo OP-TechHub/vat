@@ -113,8 +113,7 @@ export default function BulkDocumentUpload({
     for (const { i } of toUpload) {
       const r = rows[i];
       try {
-        const prev = existing.find((d) => d.return_month.slice(0, 7) === r.period && d.kind === r.kind);
-        await uploadDocument(supabase, company.id, user.id, r.period, r.kind as DocumentKind, r.file, prev);
+        await uploadDocument(supabase, company.id, user.id, r.period, r.kind as DocumentKind, r.file);
         ok++;
       } catch (err) {
         errors.push(`${r.file.name}: ${err instanceof Error ? err.message : String(err)}`);
