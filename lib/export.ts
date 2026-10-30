@@ -36,6 +36,7 @@ export function exportWorkbook(
       "Original VAT Invoice": r.original_invoice ?? "",
       "Claimed Status": isClaimed(r) ? "Claimed" : "Not Claimed",
       "Claim Month": mLabel(cm(r)),
+      "Invoice Document": r.doc_name ?? "",
     }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inv), "Invoice Listing");
 

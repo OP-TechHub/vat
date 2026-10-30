@@ -19,6 +19,10 @@ export interface Invoice {
   original_invoice: "Yes" | "No" | null;
   manual_claim_month: string | null; // YYYY-MM-DD (first of month)
   manual_not_claimed: boolean;
+  /** The invoice document (PDF or scan), when attached (migration 0017). */
+  doc_path?: string | null;
+  doc_name?: string | null;
+  doc_uploaded_at?: string | null;
   updated_at: string;
   updated_by: string | null;
   auto_claim_month: string | null; // YYYY-MM-DD

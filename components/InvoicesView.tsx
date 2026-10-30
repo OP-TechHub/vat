@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
+import { DocActions, DocHeading } from "./DocActions";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, monthKey, monthStart, sum } from "@/lib/format";
 import { reloadInvoice } from "@/lib/data";
+import { DOC_ACCEPT } from "@/lib/documents";
+import { invoiceDoc, invoiceDocumentUrl, removeInvoiceDocument, uploadInvoiceDocument } from "@/lib/invoiceDocs";
 import type { Invoice } from "@/lib/types";
 
 const PAGE_SIZE = 250;
@@ -21,6 +24,7 @@ const COLUMNS: ColumnSpec[] = [
   { key: "original_invoice", label: "Original VAT invoice" },
   { key: "status", label: "Status" },
   { key: "claimed_month", label: "Claimed month" },
+  { key: "invoice_doc", label: "Invoice document (held / none / file name)" },
 ];
 
 type StatusFilter = "" | "c" | "n";
@@ -75,6 +79,7 @@ export default function InvoicesView() {
       description: x.description,
       amount_lcy: x.amount_lcy,
       original_invoice: x.original_invoice ?? "Not marked",
+      invoice_doc: x.doc_path ? "Held " + (x.doc_name ?? "") : "None",
       status: x.claim_status === "Claimed" ? "Claimed" : "Not claimed",
       claimed_month:
         claimValue(x) === "none"
@@ -116,6 +121,61 @@ export default function InvoicesView() {
     setBusyId(null);
   }
 
+  // Invoice documents: one hidden file picker for the whole table.
+  const docFileRef = useRef<HTMLInputElement>(null);
+  const docTarget = useRef<Invoice | null>(null);
+
+  function pickDoc(inv: Invoice) {
+    docTarget.current = inv;
+    docFileRef.current?.click();
+  }
+
+  /** Re-read an invoice after its document changed. */
+  async function refresh(inv: Invoice) {
+    try {
+      patchInvoice(await reloadInvoice(supabase, inv.id));
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Saved, but the row could not be refreshed.", true);
+    }
+  }
+
+  async function onDocFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const inv = docTarget.current;
+    e.target.value = "";
+    if (!file || !inv) return;
+    setBusyId(inv.id);
+    try {
+      await uploadInvoiceDocument(supabase, inv, file);
+      flash(`Invoice document for ${inv.invoice_no} uploaded.`);
+      await refresh(inv);
+    } catch (err) {
+      flash("Could not upload: " + (err instanceof Error ? err.message : String(err)), true);
+    }
+    setBusyId(null);
+  }
+
+  async function openDoc(path: string) {
+    try {
+      window.open(await invoiceDocumentUrl(supabase, path), "_blank", "noopener");
+    } catch (err) {
+      flash("Could not open the file: " + (err instanceof Error ? err.message : String(err)), true);
+    }
+  }
+
+  async function removeDoc(inv: Invoice) {
+    if (!window.confirm(`Remove the invoice document of ${inv.invoice_no} (${inv.doc_name ?? "file"})?`)) return;
+    setBusyId(inv.id);
+    try {
+      await removeInvoiceDocument(supabase, inv);
+      flash(`Invoice document for ${inv.invoice_no} removed.`);
+      await refresh(inv);
+    } catch (err) {
+      flash("Could not remove: " + (err instanceof Error ? err.message : String(err)), true);
+    }
+    setBusyId(null);
+  }
+
   const setOriginal = (inv: Invoice, v: string) =>
     update(inv, { original_invoice: v === "Yes" || v === "No" ? v : null });
 
@@ -147,6 +207,8 @@ export default function InvoicesView() {
           }}
         />
       )}
+
+      <input ref={docFileRef} type="file" accept={DOC_ACCEPT} className="hidden" onChange={(e) => void onDocFile(e)} />
 
       <div className="bar">
         <label className="field">
@@ -230,19 +292,20 @@ export default function InvoicesView() {
               <th>Original VAT invoice</th>
               <th>Status</th>
               <th>Claimed month</th>
+              <DocHeading title="Invoice document" perm={p} />
             </tr>
             <FilterRow state={cf} />
           </thead>
           <tbody>
             {loading && !data.invoices.length ? (
               <tr>
-                <td colSpan={9} className="note">
+                <td colSpan={10} className="note">
                   Loading records…
                 </td>
               </tr>
             ) : !rows.length ? (
               <tr>
-                <td colSpan={9} className="note">
+                <td colSpan={10} className="note">
                   {data.invoices.length
                     ? "No invoices match these filters."
                     : p.upload
@@ -307,6 +370,20 @@ export default function InvoicesView() {
                         <ClaimText r={r} />
                       )}
                     </td>
+                    <td>
+                      <DocActions<{ path: string; filename: string }>
+                        doc={invoiceDoc(r)}
+                        perm={p}
+                        busy={busy}
+                        yes="Held"
+                        no="None"
+                        pillClass="pill-info"
+                        showName
+                        onOpen={(d) => void openDoc(d.path)}
+                        onPick={() => pickDoc(r)}
+                        onRemove={() => void removeDoc(r)}
+                      />
+                    </td>
                   </tr>
                 );
               })
@@ -319,6 +396,8 @@ export default function InvoicesView() {
         <div className="note">
           Status is set automatically when an invoice’s external document number appears as a tax invoice number on a
           month’s IRD input schedule. Use the claimed-month list to override where the numbers are written differently.
+          Invoice document holds the invoice itself (PDF or image, up to 25 MB); Open gives a link that works for five
+          minutes, and a re-uploaded month keeps the documents of its invoices.
         </div>
         {pages > 1 && (
           <div className="bar items-center">
