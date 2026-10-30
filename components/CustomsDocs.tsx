@@ -42,6 +42,32 @@ export function cusdecFileName(entry: CustomsEntry | null | undefined): string {
   return d ? baseName(d.filename) : "";
 }
 
+/** Search key: upper case with all spaces removed, so "imp173" finds "IMP 173". */
+const searchKey = (v: string | null | undefined) => (v ?? "").toUpperCase().replace(/\s+/g, "");
+
+/** True when the search text is blank or found in any of the values (file name, CusDec no, invoice no). */
+export function searchMatches(q: string, ...values: (string | null | undefined)[]): boolean {
+  const k = searchKey(q);
+  return !k || values.some((v) => searchKey(v).includes(k));
+}
+
+/** Search box over the file name, CusDec number and invoice number of a customs table. */
+export function CustomsSearch({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="field">
+      Search
+      <input
+        className="control w-[230px]"
+        type="search"
+        value={value}
+        placeholder="File name, Cusdec no or invoice no"
+        aria-label="Search by file name, CusDec number or invoice number"
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+}
+
 /** Headings of the three document columns. */
 export function CustomsDocHeadings({ canWrite }: { canWrite: boolean }) {
   return (

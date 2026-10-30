@@ -7,7 +7,15 @@ import CustomsUpload from "./CustomsUpload";
 import AddReconRow from "./AddReconRow";
 import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
-import { CustomsDocHeadings, DOC_FILTER_COLUMNS, cusdecFileName, docFilterValues, useCustomsDocs } from "./CustomsDocs";
+import {
+  CustomsDocHeadings,
+  CustomsSearch,
+  DOC_FILTER_COLUMNS,
+  cusdecFileName,
+  docFilterValues,
+  searchMatches,
+  useCustomsDocs,
+} from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
 import {
@@ -171,6 +179,9 @@ export default function ReconView({
     [isImport, t],
   );
   const cf = useColumnFilters(columns);
+  // Search over file name, CusDec and invoice number; while it is in use the whole tax year is shown.
+  const [q, setQ] = useState("");
+  const searching = q.trim() !== "";
   /** Report rows that pass the column filters. */
   const rowsF = useMemo(
     () =>
@@ -198,8 +209,11 @@ export default function ReconView({
           updated_in_custom_report: r.updated_in_custom_report,
           ...docFilterValues(e),
         };
+      }).filter((r) => {
+        const e = entryByInvoice.get(norm(r.invoice_no));
+        return searchMatches(q, cusdecFileName(e), r.cusdec_no, e?.cusdec_no, r.invoice_no);
       }),
-    [rows0, entryByInvoice, cf.apply],
+    [rows0, entryByInvoice, cf.apply, q],
   );
 
   // CusDec, other documents and all documents of the customs entry carrying the row's invoice number.
@@ -213,6 +227,7 @@ export default function ReconView({
     const by = new Map<string, OrphanRow[]>();
     for (const e of entries) {
       if (have.has(norm(e.invoice_no))) continue;
+      if (!searchMatches(q, cusdecFileName(e), e.cusdec_no, e.invoice_no)) continue;
       const k = customsEntryMonth(e);
       if (!k) continue;
       const list = by.get(k) ?? [];
@@ -249,7 +264,7 @@ export default function ReconView({
         })),
       );
     return by;
-  }, [entries, rows0, cf.apply]);
+  }, [entries, rows0, cf.apply, q]);
 
   // Default the upload month and the view range to the latest month with data, else the first month.
   useEffect(() => {
@@ -265,7 +280,10 @@ export default function ReconView({
   const tt = to || months[0];
   const lo = f <= tt ? f : tt;
   const hi = f <= tt ? tt : f;
-  const rangeMonths = useMemo(() => months.filter((k) => k >= lo && k <= hi), [months, lo, hi]);
+  const rangeMonths = useMemo(
+    () => months.filter((k) => searching || (k >= lo && k <= hi)),
+    [months, lo, hi, searching],
+  );
   const groups = useMemo(
     () =>
       rangeMonths
@@ -494,6 +512,7 @@ export default function ReconView({
             ))}
           </select>
         </label>
+        <CustomsSearch value={q} onChange={setQ} />
         <ClearFilters state={cf} />
         {isAdmin && <EditSwitch on={editOn} onChange={setEditOn} />}
         <span className="note pb-1.5">
@@ -582,7 +601,9 @@ export default function ReconView({
             ) : !groups.length ? (
               <tr>
                 <td colSpan={COLS} className="note">
-                  {cf.active ? (
+                  {searching ? (
+                    `No rows in the tax year match “${q.trim()}”.`
+                  ) : cf.active ? (
                     "No rows match the column filters."
                   ) : (
                     <>

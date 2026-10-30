@@ -5,7 +5,15 @@ import { useApp } from "./AppShell";
 import CustomsUpload from "./CustomsUpload";
 import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
-import { CustomsDocHeadings, DOC_FILTER_COLUMNS, cusdecFileName, docFilterValues, useCustomsDocs } from "./CustomsDocs";
+import {
+  CustomsDocHeadings,
+  CustomsSearch,
+  DOC_FILTER_COLUMNS,
+  cusdecFileName,
+  docFilterValues,
+  searchMatches,
+  useCustomsDocs,
+} from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, sum } from "@/lib/format";
 import { customsEntryMonth } from "@/lib/matchDocuments";
@@ -69,6 +77,9 @@ export default function ImportsView() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const cf = useColumnFilters(COLUMNS);
+  // Search over file name, CusDec and invoice number; while it is in use the whole tax year is shown.
+  const [q, setQ] = useState("");
+  const searching = q.trim() !== "";
 
   /** Entries by month key, in CusDec and item order; entries whose date cannot be read go under UNDATED. */
   const byMonth = useMemo(() => {
@@ -76,13 +87,15 @@ export default function ImportsView() {
     const sorted = [...entries].sort(
       (a, b) => a.cusdec_no.localeCompare(b.cusdec_no) || a.invoice_no.localeCompare(b.invoice_no) || a.item_no - b.item_no,
     );
-    const shown = cf.apply(sorted, (e) => ({ ...e, file_name: cusdecFileName(e), ...docFilterValues(e) }));
+    const shown = cf
+      .apply(sorted, (e) => ({ ...e, file_name: cusdecFileName(e), ...docFilterValues(e) }))
+      .filter((e) => searchMatches(q, cusdecFileName(e), e.cusdec_no, e.invoice_no));
     for (const e of shown) {
       const k = customsEntryMonth(e) ?? UNDATED;
       m.set(k, [...(m.get(k) ?? []), e]);
     }
     return m;
-  }, [entries, cf.apply]);
+  }, [entries, cf.apply, q]);
   const countFor = (m: string) => byMonth.get(m)?.length ?? 0;
 
   // Default the view range to the latest month with entries, else the first month of the year.
@@ -101,10 +114,10 @@ export default function ImportsView() {
   const groups = useMemo(
     () =>
       months
-        .filter((k) => k >= lo && k <= hi)
+        .filter((k) => searching || (k >= lo && k <= hi))
         .map((k) => ({ month: k, label: mLabel(k), rows: byMonth.get(k) ?? [] }))
         .filter((g) => g.rows.length),
-    [months, lo, hi, byMonth],
+    [months, lo, hi, byMonth, searching],
   );
   const undated = byMonth.get(UNDATED) ?? [];
   const all = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
@@ -250,6 +263,7 @@ export default function ImportsView() {
             ))}
           </select>
         </label>
+        <CustomsSearch value={q} onChange={setQ} />
         <ClearFilters state={cf} />
         {isAdmin && <EditSwitch on={editOn} onChange={setEditOn} />}
         <span className="note pb-1.5">
@@ -333,7 +347,9 @@ export default function ImportsView() {
             ) : !groups.length && !undated.length ? (
               <tr>
                 <td colSpan={COLS} className="note">
-                  {cf.active ? (
+                  {searching ? (
+                    `No lines in the tax year match “${q.trim()}”.`
+                  ) : cf.active ? (
                     "No lines match the column filters."
                   ) : (
                     <>
