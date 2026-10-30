@@ -115,6 +115,7 @@ export function DocActions<T extends { filename: string } = ReturnDocument>({
   yes = "Yes",
   no = "No",
   pillClass,
+  showName,
 }: {
   doc: T | null | undefined;
   canWrite: boolean;
@@ -126,6 +127,8 @@ export function DocActions<T extends { filename: string } = ReturnDocument>({
   no?: string;
   /** Pill class when no document is held (default warn). */
   pillClass?: string;
+  /** Print the held file's name beside the actions. */
+  showName?: boolean;
 }) {
   return (
     <div className="flex items-center gap-1.5">
@@ -140,6 +143,11 @@ export function DocActions<T extends { filename: string } = ReturnDocument>({
         ) : (
           <IconButton icon="upload" label="Upload" disabled={busy} onClick={onPick} />
         ))}
+      {showName && doc && (
+        <span className="text-[12px] text-muted truncate max-w-[180px]" title={doc.filename}>
+          {doc.filename}
+        </span>
+      )}
     </div>
   );
 }

@@ -17,15 +17,21 @@ import type { CustomsEntry, ReconDirection } from "@/lib/types";
 /** Filter boxes of the three document columns. */
 export const DOC_FILTER_COLUMNS: ColumnSpec[] = CUSTOMS_DOC_KINDS.map(({ kind, label }, i) => ({
   key: "doc_" + kind,
-  label: `${label} (held / none)`,
+  label: `${label} (held / none / file name)`,
   className: i === 0 ? "border-l border-line" : undefined,
 }));
 
 /** Values of the document filter boxes for a row ("" when it has no customs entry). */
 export function docFilterValues(entry: CustomsEntry | null | undefined): Record<string, string> {
   return Object.fromEntries(
-    CUSTOMS_DOC_KINDS.map(({ kind }) => ["doc_" + kind, entry ? (customsDoc(entry, kind) ? "Held" : "None") : ""]),
+    CUSTOMS_DOC_KINDS.map(({ kind }) => ["doc_" + kind, entry ? (customsDoc(entry, kind) ? "Held " + customsDoc(entry, kind)!.filename : "None") : ""]),
   );
+}
+
+/** Name of the CusDec file held for an entry, without its extension ("IMP 173"); "" when none is held. */
+export function cusdecFileName(entry: CustomsEntry | null | undefined): string {
+  const d = entry && customsDoc(entry, "cusdec");
+  return d ? d.filename.replace(/\.[^.\s]{1,5}$/, "") : "";
 }
 
 /** Headings of the three document columns. */
@@ -102,6 +108,7 @@ export function useCustomsDocs(direction: ReconDirection, onChanged: () => void 
             yes="Held"
             no="None"
             pillClass="pill-info"
+            showName
             onOpen={(d) => void open(d)}
             onPick={() => {
               target.current = { entry, kind };

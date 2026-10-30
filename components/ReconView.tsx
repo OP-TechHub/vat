@@ -7,7 +7,7 @@ import CustomsUpload from "./CustomsUpload";
 import AddReconRow from "./AddReconRow";
 import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
-import { CustomsDocHeadings, DOC_FILTER_COLUMNS, docFilterValues, useCustomsDocs } from "./CustomsDocs";
+import { CustomsDocHeadings, DOC_FILTER_COLUMNS, cusdecFileName, docFilterValues, useCustomsDocs } from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { cents, fmt, mLabel, monthKey, norm, sum } from "@/lib/format";
 import {
@@ -100,7 +100,7 @@ export default function ReconView({
   const isImport = direction === "import";
   const t = TEXT[direction];
   const customsCols = isImport ? 9 : 7;
-  const COLS = 12 + customsCols;
+  const COLS = 13 + customsCols;
 
   const [upMonth, setUpMonth] = useState("");
   const [from, setFrom] = useState("");
@@ -143,6 +143,7 @@ export default function ReconView({
   // Filter boxes under the column headings, in column order.
   const columns = useMemo<ColumnSpec[]>(
     () => [
+      { key: "file_name", label: "File name" },
       { key: "invoice_no", label: "Invoice no" },
       { key: "month", label: "Month" },
       { key: "amount_fc", label: t.amount, num: true, className: "num" },
@@ -176,6 +177,7 @@ export default function ReconView({
       cf.apply(rows0, (r) => {
         const e = entryByInvoice.get(norm(r.invoice_no));
         return {
+          file_name: cusdecFileName(e),
           invoice_no: r.invoice_no,
           month: mLabel(sm(r)),
           amount_fc: r.amount_fc,
@@ -230,6 +232,7 @@ export default function ReconView({
       by.set(
         k,
         cf.apply(list, (o) => ({
+          file_name: cusdecFileName(o.entry),
           invoice_no: o.entry.invoice_no,
           month: mLabel(k),
           cusdec_no: o.entry.cusdec_no,
@@ -434,7 +437,7 @@ export default function ReconView({
 
   const Totals = ({ rows, label }: { rows: ExportSale[]; label: string }) => (
     <tr className="total">
-      <td colSpan={2}>{label}</td>
+      <td colSpan={3}>{label}</td>
       <td className="num">{fmt(sum(rows, (r) => r.amount_fc))}</td>
       <td></td>
       <td className="num">{fmt(sum(rows, (r) => r.net_sales))}</td>
@@ -532,7 +535,7 @@ export default function ReconView({
         <table className="tbl">
           <thead>
             <tr>
-              <th colSpan={5} className="text-center" style={{ position: "static" }}>
+              <th colSpan={6} className="text-center" style={{ position: "static" }}>
                 {t.group}
               </th>
               <th colSpan={customsCols} className="text-center border-l border-line" style={{ position: "static" }}>
@@ -546,6 +549,7 @@ export default function ReconView({
               </th>
             </tr>
             <tr>
+              <th>File name</th>
               <th>Invoice no</th>
               <th>Month</th>
               <th className="num">{t.amount}</th>
@@ -719,6 +723,7 @@ function GroupRows({
         };
         return (
           <tr key={r.id} className={busy ? "opacity-60" : undefined}>
+            <td className="wrapc">{cusdecFileName(entryFor(r.invoice_no)) || <span className="text-muted">—</span>}</td>
             <td>
               {report("invoice_no", r.invoice_no, "text")}
               {editing && (
@@ -849,6 +854,7 @@ function GroupRows({
         };
         return (
           <tr key={"e" + e.id} className={"text-muted" + (busy ? " opacity-60" : "")}>
+            <td className="wrapc text-ink">{cusdecFileName(e) || <span className="text-muted">—</span>}</td>
             <td>
               {entryCell("invoice_no", e.invoice_no, "text")}{" "}
               <span className="pill pill-warn">No {isImport ? "purchase" : "sales"} invoice yet</span>

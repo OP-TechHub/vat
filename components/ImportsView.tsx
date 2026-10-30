@@ -5,7 +5,7 @@ import { useApp } from "./AppShell";
 import CustomsUpload from "./CustomsUpload";
 import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
-import { CustomsDocHeadings, DOC_FILTER_COLUMNS, docFilterValues, useCustomsDocs } from "./CustomsDocs";
+import { CustomsDocHeadings, DOC_FILTER_COLUMNS, cusdecFileName, docFilterValues, useCustomsDocs } from "./CustomsDocs";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, sum } from "@/lib/format";
 import { customsEntryMonth } from "@/lib/matchDocuments";
@@ -16,6 +16,7 @@ const UNDATED = "undated";
 
 /** Filter boxes under the column headings, in column order. */
 const COLUMNS: ColumnSpec[] = [
+  { key: "file_name", label: "File name" },
   { key: "cusdec_no", label: "Cusdec no" },
   { key: "cusdec_date", label: "Date" },
   { key: "cusdec_month", label: "Month" },
@@ -43,7 +44,7 @@ const COLUMNS: ColumnSpec[] = [
   ...DOC_FILTER_COLUMNS,
 ];
 /** Columns of the register table, for the empty / loading rows. */
-const COLS = 27;
+const COLS = 28;
 
 /** Quantity with up to three decimals, without trailing zeros. */
 const qty = (n: number | null | undefined) =>
@@ -75,7 +76,7 @@ export default function ImportsView() {
     const sorted = [...entries].sort(
       (a, b) => a.cusdec_no.localeCompare(b.cusdec_no) || a.invoice_no.localeCompare(b.invoice_no) || a.item_no - b.item_no,
     );
-    const shown = cf.apply(sorted, (e) => ({ ...e, ...docFilterValues(e) }));
+    const shown = cf.apply(sorted, (e) => ({ ...e, file_name: cusdecFileName(e), ...docFilterValues(e) }));
     for (const e of shown) {
       const k = customsEntryMonth(e) ?? UNDATED;
       m.set(k, [...(m.get(k) ?? []), e]);
@@ -172,6 +173,7 @@ export default function ImportsView() {
     };
     return (
       <tr className={busy ? "opacity-60" : undefined}>
+        <td className={"wrapc " + hdr}>{cusdecFileName(e) || <span className="text-muted">—</span>}</td>
         <td className={hdr}>{cell("cusdec_no", e.cusdec_no)}</td>
         <td className={hdr}>{cell("cusdec_date", e.cusdec_date ?? "")}</td>
         <td className={hdr}>{cell("cusdec_month", e.cusdec_month ?? "", "text", 0, "w-[90px]")}</td>
@@ -202,7 +204,7 @@ export default function ImportsView() {
   };
   const Totals = ({ rows, label }: { rows: CustomsEntry[]; label: string }) => (
     <tr className="total">
-      <td colSpan={13}>
+      <td colSpan={14}>
         {label} · {cusdecs(rows)} CusDec{cusdecs(rows) === 1 ? "" : "s"}, {rows.length} item line{rows.length === 1 ? "" : "s"}
       </td>
       <td className="num">{fmt(sum(rows, (r) => r.customs_value ?? 0))}</td>
@@ -273,7 +275,7 @@ export default function ImportsView() {
         <table className="tbl">
           <thead>
             <tr>
-              <th colSpan={4} className="text-center" style={{ position: "static" }}>
+              <th colSpan={5} className="text-center" style={{ position: "static" }}>
                 Declaration
               </th>
               <th colSpan={6} className="text-center border-l border-line" style={{ position: "static" }}>
@@ -290,6 +292,7 @@ export default function ImportsView() {
               </th>
             </tr>
             <tr>
+              <th>File name</th>
               <th>Cusdec no</th>
               <th>Date</th>
               <th>Month</th>
