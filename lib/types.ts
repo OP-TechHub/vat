@@ -262,6 +262,8 @@ export interface CustomsEntry {
   /** VTD (deferred) or VAT (upfront), as printed on the tax line. */
   vat_type: string | null;
   vat_code: string | null;
+  /** Name of the CusDec file ("IMP 173"), from the spreadsheet's File name column or the uploaded PDF. */
+  file_name?: string | null;
   /** The CusDec document in the vat-claims bucket, when one has been kept. */
   doc_path?: string | null;
   doc_name?: string | null;
@@ -325,6 +327,8 @@ export interface CustomsUploadRow {
   /** VTD (deferred) or VAT (upfront), as printed on the tax line. */
   vat_type: string | null;
   vat_code: string | null;
+  /** Name of the CusDec file ("IMP 173"), from the spreadsheet's File name column or the uploaded PDF. */
+  file_name?: string | null;
 }
 
 /** Parsed export-reconciliation row ready for replace_export_month. Null = not given in the file. */

@@ -173,7 +173,9 @@ export default function ImportsView() {
     };
     return (
       <tr className={busy ? "opacity-60" : undefined}>
-        <td className={"wrapc " + hdr}>{cusdecFileName(e) || <span className="text-muted">—</span>}</td>
+        <td className={"wrapc " + hdr}>
+          {cell("file_name", cusdecFileName(e) || <span className="text-muted">—</span>, "text", 0, "w-[110px]")}
+        </td>
         <td className={hdr}>{cell("cusdec_no", e.cusdec_no)}</td>
         <td className={hdr}>{cell("cusdec_date", e.cusdec_date ?? "")}</td>
         <td className={hdr}>{cell("cusdec_month", e.cusdec_month ?? "", "text", 0, "w-[90px]")}</td>

@@ -404,6 +404,7 @@ export function parseCustoms(
     party: col(/consignee/, /exporter/, /importer/, /supplier/, /party/, /^name/),
     desc: col(/description/, /goods/),
     m: col(/^month/),
+    file: col(/file ?name/, /^file$/, /^pdf/),
   };
   if (c.cusdec < 0 || c.inv < 0)
     throw new UploadError(`The file needs Cusdec No and Invoice No columns (sheet “${name}”).`);
@@ -451,6 +452,7 @@ export function parseCustoms(
       sscl_code: text(c.ssclc),
       vat_type: text(c.vtype),
       vat_code: text(c.vcode),
+      file_name: text(c.file),
     });
   }
   const rows = [...by.values()];
@@ -470,6 +472,7 @@ export function parseCustoms(
 /** Blank template for a customs entries upload. */
 export function customsTemplateWorkbook(direction: ReconDirection): XLSX.WorkBook {
   const head = [
+    "File Name",
     "Cusdec No",
     "Date",
     "Invoice No",

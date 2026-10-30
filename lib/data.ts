@@ -152,6 +152,7 @@ export const CUSTOMS_HEADER_FIELDS: readonly (keyof CustomsEditable)[] = [
   "ex_rate",
   "invoice_value",
   "party",
+  "file_name",
 ];
 
 /** Message for a failed save, worded for the unique keys of the uploaded tables. */

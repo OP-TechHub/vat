@@ -126,7 +126,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
             const kind: CustomsDocKind = pages.length && read.pageCount > pages.length ? "all" : "cusdec";
             // One row per item (HS code line); the header fields repeat on each.
             r.items.forEach((row, n) => {
-              rows.push(row);
+              rows.push({ ...row, file_name: row.file_name || files[i].name.replace(/\.[^.\s]{1,5}$/, "") });
               pdfFiles.push(files[i]);
               rowDocs.push(n === 0 ? { [kind]: files[i] } : {});
               notes.push(
@@ -199,6 +199,14 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     e.target.value = "";
     if (file && t) setDoc(t.i, t.kind, file);
   }
+  /** Name of the CusDec file (or the bundle holding it) a review row is saved with, without its extension. */
+  const fileName = (r: CustomsUploadRow) => {
+    if (r.file_name) return r.file_name;
+    if (!pending) return "";
+    const i = pending.rows.findIndex((x) => declKey(x) === declKey(r));
+    const f = pending.docs[i]?.cusdec ?? pending.docs[i]?.all;
+    return f ? f.name.replace(/\.[^.\s]{1,5}$/, "") : "";
+  };
   /** Documents cell of a review row: the three slots on the first line of each declaration. */
   const docsCell = (i: number, r: CustomsUploadRow) => {
     if (!pending || pending.rows.findIndex((x) => declKey(x) === declKey(r)) !== i)
@@ -281,7 +289,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       flash(
         "Could not save: " +
           error.message +
-          (/schema cache|function/i.test(error.message) ? ". Run supabase/migrations/0008_customs_entries.sql in the Supabase SQL Editor first." : ""),
+          (/schema cache|function|file_name/i.test(error.message) ? ". Run the latest supabase/migrations (0013_customs_file_name.sql) in the Supabase SQL Editor first." : ""),
         true,
       );
       return;
@@ -342,7 +350,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
         and, for every item on the form and its continuation sheets, the HS code, description, unit and quantity,
         statistical value{isImport ? " and the CID, PAL, SSCL and VAT lines with their MP codes" : ""}; or choose a
         spreadsheet of CusDec lines with columns Cusdec No, Date, Invoice No, Item No, HS Code, Description, UOM,
-        Quantity, Currency, Ex. Rate, Invoice Value (FC), Customs Value (LKR)
+        Quantity, Currency, Ex. Rate, Invoice Value (FC), Customs Value (LKR), File Name
         {isImport ? ", CID / PAL / SSCL / VAT Amount and Code, VAT Base" : ""}, {isImport ? "Supplier" : "Consignee"}.
         {isImport
           ? " Each line goes into the Import Register under its CusDec month."
@@ -394,6 +402,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
             <table className="tbl">
               <thead>
                 <tr>
+                  <th>File name</th>
                   <th>Cusdec no</th>
                   <th>Date</th>
                   <th>Invoice no</th>
@@ -417,6 +426,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
               <tbody>
                 {pending.rows.slice(0, 200).map((r, i) => (
                   <tr key={i}>
+                    <td className="wrapc">{fileName(r) || <span className="text-muted">—</span>}</td>
                     <td>
                       {pending.source === "pdf" ? (
                         <input
@@ -474,7 +484,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                 ))}
                 {pending.rows.length > 200 && (
                   <tr>
-                    <td colSpan={18} className="note">
+                    <td colSpan={19} className="note">
                       … and {pending.rows.length - 200} more rows.
                     </td>
                   </tr>

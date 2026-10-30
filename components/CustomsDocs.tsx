@@ -28,10 +28,18 @@ export function docFilterValues(entry: CustomsEntry | null | undefined): Record<
   );
 }
 
-/** Name of the CusDec file held for an entry, without its extension ("IMP 173"); "" when none is held. */
+/** Name of a file without its extension ("IMP 173.pdf" -> "IMP 173"). */
+export const baseName = (name: string) => name.replace(/\.[^.\s]{1,5}$/, "");
+
+/**
+ * File name of an entry's CusDec ("IMP 173"): as given in the upload, else the name of the CusDec file
+ * held; "" when neither.
+ */
 export function cusdecFileName(entry: CustomsEntry | null | undefined): string {
-  const d = entry && customsDoc(entry, "cusdec");
-  return d ? d.filename.replace(/\.[^.\s]{1,5}$/, "") : "";
+  if (!entry) return "";
+  if (entry.file_name) return entry.file_name;
+  const d = customsDoc(entry, "cusdec");
+  return d ? baseName(d.filename) : "";
 }
 
 /** Headings of the three document columns. */
