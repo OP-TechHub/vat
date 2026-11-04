@@ -140,11 +140,12 @@ export interface VatReturn {
 
 export type DocumentKind = "return" | "acknowledgement" | "credit_voucher";
 
-export type IrdStatusValue = "received" | "pending" | "submission";
+export type IrdStatusValue = "received" | "pending" | "submission" | "rmi";
 export const IRD_STATUS_LABEL: Record<IrdStatusValue, string> = {
   received: "Credit voucher received",
   pending: "Credit voucher pending",
   submission: "Information under submission",
+  rmi: "RMI Form Received",
 };
 
 /** Row of ird_status: credit voucher position of one taxable period. */

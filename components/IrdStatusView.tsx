@@ -212,7 +212,7 @@ export default function IrdStatusView() {
   const withData = shown.filter((r) => r.hasData);
   const StatusPill = ({ s }: { s: IrdStatusValue | null }) =>
     s ? (
-      <span className={"pill " + (s === "received" ? "pill-good" : s === "pending" ? "pill-warn" : "pill-info")}>{IRD_STATUS_LABEL[s]}</span>
+      <span className={"pill " + (s === "received" ? "pill-good" : s === "pending" || s === "rmi" ? "pill-warn" : "pill-info")}>{IRD_STATUS_LABEL[s]}</span>
     ) : (
       <span className="text-muted">—</span>
     );
@@ -274,7 +274,8 @@ export default function IrdStatusView() {
           <span className="note pb-1.5">
             {shown.length === rows.length ? `${rows.length} periods` : `${shown.length} of ${rows.length} periods`} · received{" "}
             {rows.filter((r) => r.status === "received").length} · pending {rows.filter((r) => r.status === "pending").length} · under
-            submission {rows.filter((r) => r.status === "submission").length}
+            submission {rows.filter((r) => r.status === "submission").length} · RMI form received{" "}
+            {rows.filter((r) => r.status === "rmi").length}
           </span>
         )}
       </div>
