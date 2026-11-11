@@ -9,6 +9,7 @@ import type {
   ExportSale,
   Invoice,
   IrdStatus,
+  IrdStatusOption,
   ReconDirection,
   ReturnDocument,
   Role,
@@ -311,6 +312,8 @@ export interface IrdStatusData {
   returns: IrdStatusReturn[];
   statuses: IrdStatus[];
   vouchers: ReturnDocument[];
+  /** Extra statuses added by the company admins (migration 0022); empty until it is run. */
+  options: IrdStatusOption[];
 }
 
 /** Schedule submission status of every period held (migration 0020). */
@@ -322,7 +325,7 @@ export async function loadSubmissions(sb: Db, companyId: string): Promise<Schedu
 
 /** IRD status inputs for every period, not limited to the selected tax year. */
 export async function loadIrdStatus(sb: Db, companyId: string): Promise<IrdStatusData> {
-  const [returns, statuses, vouchers] = await Promise.all([
+  const [returns, statuses, vouchers, options] = await Promise.all([
     fetchAll<IrdStatusReturn>((a, b) =>
       sb
         .from("vat_returns")
@@ -341,8 +344,19 @@ export async function loadIrdStatus(sb: Db, companyId: string): Promise<IrdStatu
         .order("return_month")
         .range(a, b),
     ),
+    loadIrdStatusOptions(sb, companyId),
   ]);
-  return { returns, statuses, vouchers };
+  return { returns, statuses, vouchers, options };
+}
+
+/** The company's extra IRD statuses, oldest first; [] while migration 0022 has not been run. */
+export async function loadIrdStatusOptions(sb: Db, companyId: string): Promise<IrdStatusOption[]> {
+  const { data, error } = await sb.from("ird_status_options").select("*").eq("company_id", companyId).order("created_at");
+  if (error) {
+    if (/schema cache|does not exist|relation .* not found/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  return (data ?? []) as IrdStatusOption[];
 }
 
 /** Re-read one schedule line from the view after an inline edit so derived fields are fresh. */

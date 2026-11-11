@@ -140,13 +140,24 @@ export interface VatReturn {
 
 export type DocumentKind = "return" | "acknowledgement" | "credit_voucher";
 
-export type IrdStatusValue = "received" | "pending" | "submission" | "rmi";
-export const IRD_STATUS_LABEL: Record<IrdStatusValue, string> = {
+/** The IRD statuses every company has. */
+export type IrdBuiltinStatus = "received" | "pending" | "submission" | "rmi";
+export const IRD_STATUS_LABEL: Record<IrdBuiltinStatus, string> = {
   received: "Credit voucher received",
   pending: "Credit voucher pending",
   submission: "Information under submission",
   rmi: "RMI Form Received",
 };
+/** A built-in status key, or the id of one of the company's own ird_status_options (migration 0022). */
+export type IrdStatusValue = string;
+
+/** Row of ird_status_options: an extra IRD status added by a company admin. */
+export interface IrdStatusOption {
+  id: string;
+  company_id: string;
+  label: string;
+  created_at?: string;
+}
 
 /** Row of ird_status: credit voucher position of one taxable period. */
 export interface IrdStatus {

@@ -8,12 +8,13 @@ import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./Co
 import { fmt, mLabel, monthKey, monthsBetween, periodCode, sum } from "@/lib/format";
 import { loadIrdStatus, type IrdStatusData } from "@/lib/data";
 import { DOC_ACCEPT, documentUrl, isMissingTable, removeDocument, uploadDocument } from "@/lib/documents";
-import { IRD_STATUS_LABEL, type IrdStatus, type IrdStatusValue, type ReturnDocument } from "@/lib/types";
+import { IRD_STATUS_LABEL, type IrdBuiltinStatus, type IrdStatus, type IrdStatusOption, type IrdStatusValue, type ReturnDocument } from "@/lib/types";
 
 /** First taxable period shown. */
 const FIRST_PERIOD = "2020-01";
-const STATUSES = Object.keys(IRD_STATUS_LABEL) as IrdStatusValue[];
-type Filter = "" | "data" | IrdStatusValue | "unset";
+const BUILTIN = Object.keys(IRD_STATUS_LABEL) as IrdBuiltinStatus[];
+/** "" all, "data" with return data, "unset" no status, otherwise a status key. */
+type Filter = string;
 type Order = "updated" | "period";
 
 interface PeriodRow {
@@ -56,7 +57,7 @@ const dayLabel = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
 
 export default function IrdStatusView() {
-  const { supabase, company, user, perm, flash } = useApp();
+  const { supabase, company, user, perm, isAdmin, flash } = useApp();
   const p = perm("ird_status");
   const [data, setData] = useState<IrdStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,12 +66,13 @@ export default function IrdStatusView() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState<string | null>(null); // month while a row is saving
+  const [manage, setManage] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const target = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (!company) {
-      setData({ returns: [], statuses: [], vouchers: [] });
+      setData({ returns: [], statuses: [], vouchers: [], options: [] });
       return;
     }
     try {
@@ -79,7 +81,7 @@ export default function IrdStatusView() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load the IRD status register.";
       setError(isMissingTable(e) ? `${msg}. Run supabase/migrations/0007_ird_status.sql in the Supabase SQL Editor.` : msg);
-      setData({ returns: [], statuses: [], vouchers: [] });
+      setData({ returns: [], statuses: [], vouchers: [], options: [] });
     }
   }, [supabase, company]);
 
@@ -124,6 +126,16 @@ export default function IrdStatusView() {
     return Object.values(by).reverse();
   }, [data]);
 
+  // Built-in statuses, then the company's own in the order they were added.
+  const statuses = useMemo(
+    () => [...BUILTIN.map((k) => ({ key: k as string, label: IRD_STATUS_LABEL[k] })), ...(data?.options ?? []).map((o) => ({ key: o.id, label: o.label }))],
+    [data],
+  );
+  const statusLabel = useCallback(
+    (s: IrdStatusValue | null) => (s ? (statuses.find((x) => x.key === s)?.label ?? "Unknown status") : "Not set"),
+    [statuses],
+  );
+
   const periodKeys = useMemo(() => rows.map((r) => r.month).reverse(), [rows]);
   const cf = useColumnFilters(IRD_COLUMNS);
   const shown = useMemo(() => {
@@ -145,14 +157,14 @@ export default function IrdStatusView() {
       refund: x.hasData ? x.refund : null,
       net_refund: x.hasData ? x.netRefund : null,
       input_less_paid: x.hasData ? x.inputLessPaid : null,
-      status: x.status ? IRD_STATUS_LABEL[x.status] : "Not set",
+      status: statusLabel(x.status),
       voucher_date: x.voucherDate,
       voucher_value: x.voucherValue,
       voucher: x.voucher ? "Yes " + x.voucher.filename : "No",
       remarks: x.remarks,
       updated: dayLabel(x.updatedAt),
     }));
-  }, [rows, filter, order, from, to, cf.apply]);
+  }, [rows, filter, order, from, to, cf.apply, statusLabel]);
 
   async function save(row: PeriodRow, patch: Partial<Pick<IrdStatus, "status" | "voucher_date" | "voucher_value" | "remarks">>) {
     if (!company) return;
@@ -171,7 +183,13 @@ export default function IrdStatusView() {
     const { error: err } = await supabase.from("ird_status").upsert(upsert, { onConflict: "company_id,return_month" });
     if (err)
       flash(
-        "Could not save: " + err.message + (/remarks/i.test(err.message) ? ". Run supabase/migrations/0021_ird_status_remarks.sql in the Supabase SQL Editor." : ""),
+        "Could not save: " +
+          err.message +
+          (/remarks/i.test(err.message)
+            ? ". Run supabase/migrations/0021_ird_status_remarks.sql in the Supabase SQL Editor."
+            : /status_check/i.test(err.message)
+              ? ". Run supabase/migrations/0022_ird_status_options.sql in the Supabase SQL Editor."
+              : ""),
         true,
       );
     else {
@@ -238,7 +256,7 @@ export default function IrdStatusView() {
   const withData = shown.filter((r) => r.hasData);
   const StatusPill = ({ s }: { s: IrdStatusValue | null }) =>
     s ? (
-      <span className={"pill " + (s === "received" ? "pill-good" : s === "pending" || s === "rmi" ? "pill-warn" : "pill-info")}>{IRD_STATUS_LABEL[s]}</span>
+      <span className={"pill " + (s === "received" ? "pill-good" : s === "pending" || s === "rmi" ? "pill-warn" : "pill-info")}>{statusLabel(s)}</span>
     ) : (
       <span className="text-muted">—</span>
     );
@@ -275,9 +293,9 @@ export default function IrdStatusView() {
           <select className="control" value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
             <option value="">All periods</option>
             <option value="data">Periods with return data</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {IRD_STATUS_LABEL[s]}
+            {statuses.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
               </option>
             ))}
             <option value="unset">Status not set</option>
@@ -303,17 +321,27 @@ export default function IrdStatusView() {
           </button>
         )}
         <ClearFilters state={cf} />
+        {isAdmin && (
+          <button className="btn" type="button" onClick={() => setManage((m) => !m)}>
+            {manage ? "Close status options" : "Status options"}
+          </button>
+        )}
         {data && (
           <span className="note pb-1.5">
-            {shown.length === rows.length ? `${rows.length} periods` : `${shown.length} of ${rows.length} periods`} · received{" "}
-            {rows.filter((r) => r.status === "received").length} · pending {rows.filter((r) => r.status === "pending").length} · under
-            submission {rows.filter((r) => r.status === "submission").length} · RMI form received{" "}
-            {rows.filter((r) => r.status === "rmi").length}
+            {shown.length === rows.length ? `${rows.length} periods` : `${shown.length} of ${rows.length} periods`}
+            {statuses.map((s) => ` · ${s.label.toLowerCase()} ${rows.filter((r) => r.status === s.key).length}`).join("")}
           </span>
         )}
       </div>
 
       {error && <div className="msg msg-err">{error}</div>}
+      {manage && isAdmin && company && data && (
+        <StatusOptions
+          options={data.options}
+          inUse={(id) => rows.filter((r) => r.status === id).length}
+          onChanged={load}
+        />
+      )}
 
       <div className="scroll">
         <table className="tbl">
@@ -369,12 +397,12 @@ export default function IrdStatusView() {
                             value={r.status ?? ""}
                             disabled={isBusy}
                             aria-label={`Status for ${mLabel(r.month)}`}
-                            onChange={(e) => void save(r, { status: (e.target.value || null) as IrdStatusValue | null })}
+                            onChange={(e) => void save(r, { status: e.target.value || null })}
                           >
                             <option value="">Not set</option>
-                            {STATUSES.map((s) => (
-                              <option key={s} value={s}>
-                                {IRD_STATUS_LABEL[s]}
+                            {statuses.map((s) => (
+                              <option key={s.key} value={s.key}>
+                                {s.label}
                               </option>
                             ))}
                           </select>
@@ -501,5 +529,124 @@ function ValueInput({
         if (e.key === "Escape") setDraft(value);
       }}
     />
+  );
+}
+
+/** Admin panel: the four built-in statuses, and the company's own, which can be added, renamed and deleted. */
+function StatusOptions({ options, inUse, onChanged }: { options: IrdStatusOption[]; inUse: (id: string) => number; onChanged: () => Promise<void> }) {
+  const { supabase, company, user, flash } = useApp();
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const taken = (text: string, except?: string) => {
+    const t = text.trim().toLowerCase();
+    return (
+      Object.values(IRD_STATUS_LABEL).some((l) => l.toLowerCase() === t) ||
+      options.some((o) => o.id !== except && o.label.trim().toLowerCase() === t)
+    );
+  };
+  const hint = (msg: string) =>
+    msg + (/schema cache|does not exist/i.test(msg) ? ". Run supabase/migrations/0022_ird_status_options.sql in the Supabase SQL Editor." : "");
+
+  async function run(work: () => PromiseLike<{ error: { message: string } | null }>, done: string) {
+    setBusy(true);
+    const { error } = await work();
+    if (error) flash("Could not save the status: " + hint(error.message), true);
+    else {
+      flash(done);
+      await onChanged();
+    }
+    setBusy(false);
+  }
+
+  function add() {
+    const text = label.trim().replace(/\s+/g, " ");
+    if (!text || !company) return;
+    if (taken(text)) return flash(`“${text}” is already a status.`, true);
+    void run(
+      () => supabase.from("ird_status_options").insert({ company_id: company.id, label: text, created_by: user.id }),
+      `Status “${text}” added.`,
+    ).then(() => setLabel(""));
+  }
+
+  function rename(o: IrdStatusOption, value: string) {
+    const text = value.trim().replace(/\s+/g, " ");
+    if (!text || text === o.label) return;
+    if (taken(text, o.id)) return flash(`“${text}” is already a status.`, true);
+    void run(() => supabase.from("ird_status_options").update({ label: text }).eq("id", o.id), `Status renamed to “${text}”.`);
+  }
+
+  function remove(o: IrdStatusOption) {
+    const n = inUse(o.id);
+    if (n) return flash(`“${o.label}” is the status of ${n} period${n === 1 ? "" : "s"}. Change their status first.`, true);
+    if (!window.confirm(`Delete the status “${o.label}”?`)) return;
+    void run(() => supabase.from("ird_status_options").delete().eq("id", o.id), `Status “${o.label}” deleted.`);
+  }
+
+  return (
+    <div className="panel">
+      <div className="font-semibold mb-2">Status options</div>
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th className="num">Periods</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {(Object.keys(IRD_STATUS_LABEL) as IrdBuiltinStatus[]).map((k) => (
+            <tr key={k}>
+              <td>{IRD_STATUS_LABEL[k]}</td>
+              <td className="num">{inUse(k)}</td>
+              <td className="text-muted">Built in</td>
+            </tr>
+          ))}
+          {options.map((o) => (
+            <tr key={o.id}>
+              <td>
+                <CellInput
+                  key={o.id + ":" + o.label}
+                  value={o.label}
+                  kind="text"
+                  className="w-[260px]"
+                  disabled={busy}
+                  label={`Rename ${o.label}`}
+                  onCommit={(v) => rename(o, v)}
+                />
+              </td>
+              <td className="num">{inUse(o.id)}</td>
+              <td>
+                <button className="btn" type="button" disabled={busy} onClick={() => remove(o)}>
+                  Delete
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="bar mt-2">
+        <label className="field">
+          New status
+          <input
+            className="control w-[260px]"
+            value={label}
+            maxLength={80}
+            disabled={busy}
+            placeholder="e.g. Audit in progress"
+            onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") add();
+            }}
+          />
+        </label>
+        <button className="btn btn-primary" type="button" disabled={busy || !label.trim()} onClick={add}>
+          Add status
+        </button>
+      </div>
+      <div className="note">
+        Only company admins see this panel. New statuses appear in every period’s Status list and in Show. Rename one by typing over
+        it (every period with it follows); a status can be deleted once no period uses it. The four built-in statuses cannot be changed.
+      </div>
+    </div>
   );
 }
