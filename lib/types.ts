@@ -155,6 +155,8 @@ export interface IrdStatus {
   status: IrdStatusValue | null;
   voucher_date: string | null; // YYYY-MM-DD
   voucher_value: number | null;
+  /** Free-text remarks on the period (migration 0021). */
+  remarks?: string | null;
   updated_at?: string;
   updated_by?: string | null;
 }

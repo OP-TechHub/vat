@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useApp } from "./AppShell";
 import { DocActions, DocHeading } from "./DocActions";
+import CellInput from "./CellInput";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, monthKey, monthsBetween, periodCode, sum } from "@/lib/format";
 import { loadIrdStatus, type IrdStatusData } from "@/lib/data";
@@ -13,6 +14,7 @@ import { IRD_STATUS_LABEL, type IrdStatus, type IrdStatusValue, type ReturnDocum
 const FIRST_PERIOD = "2020-01";
 const STATUSES = Object.keys(IRD_STATUS_LABEL) as IrdStatusValue[];
 type Filter = "" | "data" | IrdStatusValue | "unset";
+type Order = "updated" | "period";
 
 interface PeriodRow {
   month: string; // YYYY-MM
@@ -25,6 +27,9 @@ interface PeriodRow {
   voucherDate: string | null;
   voucherValue: number | null;
   voucher: ReturnDocument | null;
+  remarks: string | null;
+  /** Last change to the period's status, voucher figures, remarks or voucher file (ISO time), if any. */
+  updatedAt: string | null;
 }
 
 /** Number -> "1,234,567.89" for the value box; "" for null. */
@@ -42,7 +47,13 @@ const IRD_COLUMNS: ColumnSpec[] = [
   { key: "voucher_date", label: "Date of credit voucher" },
   { key: "voucher_value", label: "Value of credit voucher", num: true, className: "num" },
   { key: "voucher", label: "Credit voucher (yes / no / file name)" },
+  { key: "remarks", label: "Remarks" },
+  { key: "updated", label: "Last updated" },
 ];
+
+/** "11 Nov 2026" from an ISO time. */
+const dayLabel = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
 
 export default function IrdStatusView() {
   const { supabase, company, user, perm, flash } = useApp();
@@ -50,6 +61,7 @@ export default function IrdStatusView() {
   const [data, setData] = useState<IrdStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("");
+  const [order, setOrder] = useState<Order>("updated");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState<string | null>(null); // month while a row is saving
@@ -83,7 +95,7 @@ export default function IrdStatusView() {
     const latest = [today, ...data.returns.map((r) => monthKey(r.return_month))].sort().pop()!;
     const by: Record<string, PeriodRow> = {};
     for (const k of monthsBetween(FIRST_PERIOD, latest))
-      by[k] = { month: k, hasData: false, deferred: null, refund: null, netRefund: null, inputLessPaid: null, status: null, voucherDate: null, voucherValue: null, voucher: null };
+      by[k] = { month: k, hasData: false, deferred: null, refund: null, netRefund: null, inputLessPaid: null, status: null, voucherDate: null, voucherValue: null, voucher: null, remarks: null, updatedAt: null };
     for (const r of data.returns) {
       const row = by[monthKey(r.return_month)];
       if (!row) continue;
@@ -100,10 +112,14 @@ export default function IrdStatusView() {
       row.status = s.status;
       row.voucherDate = s.voucher_date;
       row.voucherValue = s.voucher_value;
+      row.remarks = s.remarks ?? null;
+      row.updatedAt = s.updated_at ?? null;
     }
     for (const d of data.vouchers) {
       const row = by[monthKey(d.return_month)];
-      if (row) row.voucher = d;
+      if (!row) continue;
+      row.voucher = d;
+      if (d.uploaded_at && (!row.updatedAt || d.uploaded_at > row.updatedAt)) row.updatedAt = d.uploaded_at;
     }
     return Object.values(by).reverse();
   }, [data]);
@@ -119,6 +135,9 @@ export default function IrdStatusView() {
     if (filter === "data") r = r.filter((x) => x.hasData);
     else if (filter === "unset") r = r.filter((x) => x.hasData && !x.status);
     else if (filter) r = r.filter((x) => x.status === filter);
+    // Last updated first: periods changed most recently on top, then the rest newest period first.
+    if (order === "updated")
+      r = [...r].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "") || b.month.localeCompare(a.month));
     return cf.apply(r, (x) => ({
       period_code: periodCode(x.month),
       taxable_period: mLabel(x.month),
@@ -130,10 +149,12 @@ export default function IrdStatusView() {
       voucher_date: x.voucherDate,
       voucher_value: x.voucherValue,
       voucher: x.voucher ? "Yes " + x.voucher.filename : "No",
+      remarks: x.remarks,
+      updated: dayLabel(x.updatedAt),
     }));
-  }, [rows, filter, from, to, cf.apply]);
+  }, [rows, filter, order, from, to, cf.apply]);
 
-  async function save(row: PeriodRow, patch: Partial<Pick<IrdStatus, "status" | "voucher_date" | "voucher_value">>) {
+  async function save(row: PeriodRow, patch: Partial<Pick<IrdStatus, "status" | "voucher_date" | "voucher_value" | "remarks">>) {
     if (!company) return;
     setBusy(row.month);
     const upsert: IrdStatus = {
@@ -142,12 +163,17 @@ export default function IrdStatusView() {
       status: row.status,
       voucher_date: row.voucherDate,
       voucher_value: row.voucherValue,
+      remarks: row.remarks,
       ...patch,
       updated_by: user.id,
       updated_at: new Date().toISOString(),
     };
     const { error: err } = await supabase.from("ird_status").upsert(upsert, { onConflict: "company_id,return_month" });
-    if (err) flash("Could not save: " + err.message, true);
+    if (err)
+      flash(
+        "Could not save: " + err.message + (/remarks/i.test(err.message) ? ". Run supabase/migrations/0021_ird_status_remarks.sql in the Supabase SQL Editor." : ""),
+        true,
+      );
     else {
       flash(null);
       await load();
@@ -257,6 +283,13 @@ export default function IrdStatusView() {
             <option value="unset">Status not set</option>
           </select>
         </label>
+        <label className="field">
+          Order
+          <select className="control" value={order} onChange={(e) => setOrder(e.target.value as Order)}>
+            <option value="updated">Last updated first</option>
+            <option value="period">Newest period first</option>
+          </select>
+        </label>
         {(from || to) && (
           <button
             className="btn"
@@ -296,19 +329,21 @@ export default function IrdStatusView() {
               <th>Date of credit voucher</th>
               <th className="num">Value of credit voucher</th>
               <DocHeading title="Credit voucher" perm={p} />
+              <th>Remarks</th>
+              <th>Last updated</th>
             </tr>
             <FilterRow state={cf} />
           </thead>
           <tbody>
             {!data ? (
               <tr>
-                <td colSpan={10} className="note">
+                <td colSpan={12} className="note">
                   Loading records…
                 </td>
               </tr>
             ) : !shown.length ? (
               <tr>
-                <td colSpan={10} className="note">
+                <td colSpan={12} className="note">
                   {cf.active ? "No periods match the column filters." : "No periods match."}
                 </td>
               </tr>
@@ -387,6 +422,25 @@ export default function IrdStatusView() {
                           onRemove={() => void remove(r)}
                         />
                       </td>
+                      <td className="wrapc text-xs min-w-[200px]">
+                        {p.edit ? (
+                          <CellInput
+                            key={r.month + ":" + (r.remarks ?? "")}
+                            value={r.remarks ?? ""}
+                            kind="text"
+                            className="w-[240px]"
+                            disabled={isBusy}
+                            label={`Remarks for ${mLabel(r.month)}`}
+                            onCommit={(v) => {
+                              const next = v.trim() || null;
+                              if (next !== r.remarks) void save(r, { remarks: next });
+                            }}
+                          />
+                        ) : (
+                          r.remarks
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap text-muted">{dayLabel(r.updatedAt)}</td>
                     </tr>
                   );
                 })}
@@ -398,7 +452,7 @@ export default function IrdStatusView() {
                   <td className="num">{fmt(sum(withData, (r) => r.inputLessPaid ?? 0))}</td>
                   <td colSpan={2}></td>
                   <td className="num">{fmt(sum(shown, (r) => r.voucherValue ?? 0))}</td>
-                  <td></td>
+                  <td colSpan={3}></td>
                 </tr>
               </>
             )}
@@ -411,7 +465,9 @@ export default function IrdStatusView() {
         reconciliation tab. Input tax less tax paid is upfront import tax (5) plus tax on local purchases (6), less disallowed
         input tax on imports and other purchases (8) and on suspended purchases (8A), plus monthly payments (Q), highlighted when
         negative. Status, voucher date and value are entered here; the date, value and attachment open
-        once the status is “Credit voucher received”. Vouchers are kept with the returns in the vat-claims bucket.
+        once the status is “Credit voucher received”. Vouchers are kept with the returns in the vat-claims bucket. Remarks
+        are free text, saved when you leave the box or press Enter. Rows are listed last updated first (a change to the
+        status, voucher, remarks or voucher file), then newest period first; switch Order to list them by period only.
       </div>
     </>
   );
