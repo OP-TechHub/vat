@@ -277,8 +277,33 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
   // Import entries may have no invoice number (logbook entries); exports are matched to the sales report by it.
   const incomplete = (pending?.rows ?? []).filter((r) => !r.cusdec_no.trim() || (!isImport && !r.invoice_no.trim())).length;
   // Declarations of the upload already in the Import Register: saving replaces their lines (documents are kept).
+  // Also those held under the same CusDec number and month with a different invoice number (a logbook entry
+  // without one, or the invoice written differently), which saving would add a second time.
+  const norm = (s: string) => s.toUpperCase().replace(/s+/g, "");
   const held = isImport ? new Set(data.importEntries.map((e) => e.cusdec_no + "|" + e.invoice_no)) : null;
-  const replacing = held && pending ? new Set(pending.rows.map(declKey).filter((k) => held.has(k))).size : 0;
+  const heldMonth = isImport ? new Set(data.importEntries.map((e) => norm(e.cusdec_no) + "|" + (e.cusdec_month ?? ""))) : null;
+  const isHeld = (r: CustomsUploadRow) => !!held?.has(declKey(r));
+  const isNear = (r: CustomsUploadRow) => !isHeld(r) && !!heldMonth?.has(norm(r.cusdec_no) + "|" + (r.cusdec_month ?? ""));
+  const replacing = pending ? new Set(pending.rows.filter(isHeld).map(declKey)).size : 0;
+  const near = pending ? new Set(pending.rows.filter(isNear).map(declKey)).size : 0;
+
+  /** Drop the declarations already in the register (exact or same CusDec and month) from the upload. */
+  function leaveOutHeld() {
+    if (!pending) return;
+    const keep = pending.rows.map((r) => !isHeld(r) && !isNear(r));
+    const rows = pending.rows.filter((_, i) => keep[i]);
+    const left = new Set(rows.map(declKey)).size;
+    setPending({
+      ...pending,
+      rows,
+      notes: pending.notes.filter((_, i) => keep[i]),
+      docs: pending.docs.filter((_, i) => keep[i]),
+      text:
+        `Left out ${replacing + near} CusDec${replacing + near === 1 ? "" : "s"} already in the Import Register. ` +
+        `${rows.length} line${rows.length === 1 ? "" : "s"} of ${left} CusDec${left === 1 ? "" : "s"} remain${rows.length === 1 ? "s" : ""}` +
+        ` (${rows.filter((r) => r.to_complete).length} tagged “To complete”), customs value ${fmt(rows.reduce((a, r) => a + (r.customs_value ?? 0), 0))}.`,
+    });
+  }
 
   async function save() {
     if (!pending || !company || incomplete) return;
@@ -402,10 +427,23 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       {pending && (
         <>
           <div className="msg">{pending.text}</div>
-          {replacing > 0 && (
+          {(replacing > 0 || near > 0) && (
             <div className="msg msg-warn">
-              {replacing} of these CusDecs {replacing === 1 ? "is" : "are"} already in the Import Register: saving replaces
-              {replacing === 1 ? " its" : " their"} lines with the ones below (documents already attached are kept).
+              {replacing > 0 && (
+                <>
+                  {replacing} of these CusDecs {replacing === 1 ? "is" : "are"} already in the Import Register: saving replaces
+                  {replacing === 1 ? " its" : " their"} lines with the ones below (documents already attached are kept).{" "}
+                </>
+              )}
+              {near > 0 && (
+                <>
+                  {near} more {near === 1 ? "has" : "have"} the CusDec number and month of an entry already held but a different
+                  invoice number: saving would add {near === 1 ? "it" : "them"} a second time.{" "}
+                </>
+              )}
+              <button className="btn mt-1" type="button" onClick={leaveOutHeld} disabled={!!busy}>
+                Leave out the {replacing + near} already held
+              </button>
             </div>
           )}
           <input ref={docRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onDocPicked} />
