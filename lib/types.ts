@@ -285,6 +285,13 @@ export interface CustomsEntry {
   all_doc_path?: string | null;
   all_doc_name?: string | null;
   all_doc_uploaded_at?: string | null;
+  /**
+   * Tagged "to complete" (migration 0019): loaded from a logbook rather than read from the CusDec, so the CusDec
+   * still has to be uploaded and blank or worked-out fields completed. Kept on every line of the declaration.
+   */
+  to_complete?: boolean;
+  /** Free-text note on the line (source of the figures, what to check). */
+  remarks?: string | null;
   created_at: string;
   created_by: string | null;
 }
@@ -341,6 +348,9 @@ export interface CustomsUploadRow {
   vat_code: string | null;
   /** Name of the CusDec file ("IMP 173"), from the spreadsheet's File name column or the uploaded PDF. */
   file_name?: string | null;
+  /** From the spreadsheet's To Complete column; PDF rows are complete. */
+  to_complete?: boolean;
+  remarks?: string | null;
 }
 
 /** Parsed export-reconciliation row ready for replace_export_month. Null = not given in the file. */

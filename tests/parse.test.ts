@@ -452,6 +452,23 @@ describe("customs entries and import reconciliation uploads", () => {
     expect(() => parseCustoms(sheet([["x", 1]], ["Invoice No", "Amount"], "S"), "import")).toThrow(/Cusdec No/);
   });
 
+  it("reads the To Complete tag and remarks, and keeps logbook imports without an invoice number", () => {
+    const head = ["Cusdec No", "Date", "Invoice No", "Item No", "Customs Value (LKR)", "To Complete", "Remarks"];
+    const rows = [
+      ["S 23519", "19/10/2023", "", 1, 4531802, "Yes", "From TIEP logbook"],
+      ["S 23519", "19/10/2023", "", 2, 0, "Yes", ""],
+      ["S 4475", "16/02/2025", "2025-012", 1, 32325285, "", ""],
+    ];
+    const imp = parseCustoms(sheet(rows, head, "Import Register"), "import");
+    expect(imp.rows).toHaveLength(3);
+    expect(imp.rows[0]).toMatchObject({ cusdec_no: "S 23519", invoice_no: "", item_no: 1, cusdec_month: "Oct 2023", to_complete: true, remarks: "From TIEP logbook" });
+    expect(imp.rows[1]).toMatchObject({ item_no: 2, to_complete: true, remarks: null });
+    expect(imp.rows[2]).toMatchObject({ invoice_no: "2025-012", to_complete: false });
+    expect(imp.text).toMatch(/2 of them are tagged “To complete”/);
+    // exports still need the invoice number, which matches them to the sales report
+    expect(parseCustoms(sheet(rows, head, "Export Entries"), "export").rows).toHaveLength(1);
+  });
+
   it("parses an import purchase report with the VAT as per customs column", () => {
     const buf = sheet(
       [

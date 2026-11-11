@@ -111,6 +111,8 @@ export function exportWorkbook(
         "VAT Amount": e.vat_amount ?? "",
         "VAT Type": e.vat_type ?? "",
         "VAT Code": e.vat_code ?? "",
+        "To Complete": e.to_complete ? "Yes" : "",
+        Remarks: e.remarks ?? "",
         "CusDec File": e.doc_name ?? "",
         "Commercial Invoice File": e.invoice_doc_name ?? "",
         "Other Documents File": e.other_doc_name ?? "",

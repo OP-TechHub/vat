@@ -136,6 +136,9 @@ body {
   .msg-err {
     @apply bg-bad-soft text-bad;
   }
+  .msg-warn {
+    @apply bg-warn-soft text-warn;
+  }
   .note {
     @apply text-[13px] text-muted;
   }

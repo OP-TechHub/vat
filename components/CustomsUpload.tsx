@@ -64,7 +64,7 @@ function NumOrText({
 }
 
 export default function CustomsUpload({ direction }: { direction: ReconDirection }) {
-  const { supabase, company, reload, flash } = useApp();
+  const { supabase, company, reload, flash, data } = useApp();
   const [pending, setPending] = useState<Pending | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // "Reading 2 of 5…" or "Saving…"
@@ -274,7 +274,11 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
     );
   };
 
-  const incomplete = (pending?.rows ?? []).filter((r) => !r.cusdec_no.trim() || !r.invoice_no.trim()).length;
+  // Import entries may have no invoice number (logbook entries); exports are matched to the sales report by it.
+  const incomplete = (pending?.rows ?? []).filter((r) => !r.cusdec_no.trim() || (!isImport && !r.invoice_no.trim())).length;
+  // Declarations of the upload already in the Import Register: saving replaces their lines (documents are kept).
+  const held = isImport ? new Set(data.importEntries.map((e) => e.cusdec_no + "|" + e.invoice_no)) : null;
+  const replacing = held && pending ? new Set(pending.rows.map(declKey).filter((k) => held.has(k))).size : 0;
 
   async function save() {
     if (!pending || !company || incomplete) return;
@@ -398,6 +402,12 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
       {pending && (
         <>
           <div className="msg">{pending.text}</div>
+          {replacing > 0 && (
+            <div className="msg msg-warn">
+              {replacing} of these CusDecs {replacing === 1 ? "is" : "are"} already in the Import Register: saving replaces
+              {replacing === 1 ? " its" : " their"} lines with the ones below (documents already attached are kept).
+            </div>
+          )}
           <input ref={docRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onDocPicked} />
           <div className="scroll max-h-[36vh]">
             <table className="tbl">
@@ -443,10 +453,10 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
                     <td>{cell(i, r, "cusdec_date", "text", "w-[95px]")}</td>
                     <td>
                       <input
-                        className={"control w-[150px]" + (r.invoice_no.trim() ? "" : " border-bad")}
+                        className={"control w-[150px]" + (r.invoice_no.trim() || isImport ? "" : " border-bad")}
                         value={r.invoice_no}
                         aria-label={`Invoice number, row ${i + 1}`}
-                        placeholder="Required"
+                        placeholder={isImport ? "" : "Required"}
                         onChange={(e) => setRow(i, { invoice_no: e.target.value })}
                       />
                     </td>
@@ -502,7 +512,7 @@ export default function CustomsUpload({ direction }: { direction: ReconDirection
             </button>
             {incomplete > 0 && (
               <span className="note pb-1.5">
-                {incomplete} row{incomplete === 1 ? " needs" : "s need"} a CusDec number and an invoice number before saving.
+                {incomplete} row{incomplete === 1 ? " needs" : "s need"} a CusDec number{isImport ? "" : " and an invoice number"} before saving.
               </span>
             )}
           </div>

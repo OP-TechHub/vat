@@ -25,6 +25,7 @@ const UNDATED = "undated";
 
 /** Filter boxes under the column headings, in column order. */
 const COLUMNS: ColumnSpec[] = [
+  { key: "to_complete", label: "To complete (yes / no)" },
   { key: "file_name", label: "File name" },
   { key: "cusdec_no", label: "Cusdec no" },
   { key: "cusdec_date", label: "Date" },
@@ -50,10 +51,26 @@ const COLUMNS: ColumnSpec[] = [
   { key: "vat_amount", label: "VAT", num: true, className: "num" },
   { key: "vat_type", label: "VAT type" },
   { key: "vat_code", label: "VAT code" },
+  { key: "remarks", label: "Remarks", className: "border-l border-line" },
   ...DOC_FILTER_COLUMNS,
 ];
 /** Columns of the register table, for the empty / loading rows. */
-const COLS = 25 + CUSTOMS_DOC_KINDS.length;
+const COLS = 27 + CUSTOMS_DOC_KINDS.length;
+
+/** What a declaration tagged "to complete" still lacks: the CusDec file, then the blank fields. */
+function missingInfo(e: CustomsEntry): { upload: boolean; fields: string[] } {
+  const fields = [
+    !e.invoice_no.trim() && "invoice no",
+    !e.party?.trim() && "supplier",
+    !e.currency_type?.trim() && "currency",
+    e.ex_rate == null && "ex. rate",
+    e.invoice_value == null && "invoice value",
+    e.cid_amount == null && e.pal_amount == null && e.sscl_amount == null && "CID / PAL / SSCL",
+    (e.vat_base == null || e.vat_amount == null) && "value for VAT / VAT",
+    !e.vat_type?.trim() && "VAT type",
+  ].filter((x): x is string => !!x);
+  return { upload: !e.doc_path && !e.all_doc_path, fields };
+}
 
 /** Quantity with up to three decimals, without trailing zeros. */
 const qty = (n: number | null | undefined) =>
@@ -90,7 +107,7 @@ export default function ImportsView() {
       (a, b) => a.cusdec_no.localeCompare(b.cusdec_no) || a.invoice_no.localeCompare(b.invoice_no) || a.item_no - b.item_no,
     );
     const shown = cf
-      .apply(sorted, (e) => ({ ...e, file_name: cusdecFileName(e), ...docFilterValues(e) }))
+      .apply(sorted, (e) => ({ ...e, to_complete: !!e.to_complete, file_name: cusdecFileName(e), ...docFilterValues(e) }))
       .filter((e) => searchMatches(q, cusdecFileName(e), e.cusdec_no, e.invoice_no));
     for (const e of shown) {
       const k = customsEntryMonth(e) ?? UNDATED;
@@ -186,8 +203,37 @@ export default function ImportsView() {
         />
       );
     };
+    const todo = e.to_complete ? missingInfo(e) : null;
     return (
       <tr className={busy ? "opacity-60" : undefined}>
+        <td className="wrapc">
+          {first && (
+            <>
+              {todo ? (
+                <>
+                  <span className="pill pill-warn">To complete</span>
+                  <div className="text-xs text-muted mt-0.5 min-w-[150px]">
+                    {todo.upload && <div>Upload the CusDec</div>}
+                    {todo.fields.length > 0 && <div>Complete: {todo.fields.join(", ")}</div>}
+                    {!todo.upload && !todo.fields.length && <div>Check the figures, then mark complete</div>}
+                  </div>
+                </>
+              ) : (
+                <span className="text-muted">—</span>
+              )}
+              {editing && (
+                <button
+                  className="btn mt-1 block text-xs"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void save(e, { to_complete: !e.to_complete })}
+                >
+                  {e.to_complete ? "Mark complete" : "Tag to complete"}
+                </button>
+              )}
+            </>
+          )}
+        </td>
         <td className={"wrapc " + hdr}>
           {cell("file_name", cusdecFileName(e) || <span className="text-muted">—</span>, "text", 0, "w-[110px]")}
         </td>
@@ -215,13 +261,14 @@ export default function ImportsView() {
         <td className="num">{cell("vat_amount", fmt(e.vat_amount), "num", 2, "w-[110px]")}</td>
         <td className="text-center">{cell("vat_type", e.vat_type ?? "", "text", 0, "w-[60px]")}</td>
         <td className="text-center">{cell("vat_code", e.vat_code ?? "", "text", 0, "w-[60px]")}</td>
+        <td className="wrapc border-l border-line text-xs min-w-[200px]">{cell("remarks", e.remarks ?? "", "text", 0, "w-[220px]")}</td>
         {docs.cells(e)}
       </tr>
     );
   };
   const Totals = ({ rows, label }: { rows: CustomsEntry[]; label: string }) => (
     <tr className="total">
-      <td colSpan={14}>
+      <td colSpan={15}>
         {label} · {cusdecs(rows)} CusDec{cusdecs(rows) === 1 ? "" : "s"}, {rows.length} item line{rows.length === 1 ? "" : "s"}
       </td>
       <td className="num">{fmt(sum(rows, (r) => r.customs_value ?? 0))}</td>
@@ -233,7 +280,7 @@ export default function ImportsView() {
       <td></td>
       <td className="num">{fmt(sum(rows, (r) => r.vat_base ?? 0))}</td>
       <td className="num">{fmt(sum(rows, (r) => r.vat_amount ?? 0))}</td>
-      <td colSpan={2 + CUSTOMS_DOC_KINDS.length}></td>
+      <td colSpan={3 + CUSTOMS_DOC_KINDS.length}></td>
     </tr>
   );
 
@@ -278,6 +325,12 @@ export default function ImportsView() {
           {cusdecs(all.filter((r) => r.invoice_doc_path))} with the commercial invoice ·{" "}
           {cusdecs(all.filter((r) => r.other_doc_path))} with other
           documents · {cusdecs(all.filter((r) => r.all_doc_path))} with all documents
+          {all.some((r) => r.to_complete) && (
+            <>
+              {" · "}
+              <span className="text-warn">{cusdecs(all.filter((r) => r.to_complete))} to complete</span>
+            </>
+          )}
           {undated.length > 0 && (
             <>
               {" · "}
@@ -295,7 +348,7 @@ export default function ImportsView() {
         <table className="tbl">
           <thead>
             <tr>
-              <th colSpan={5} className="text-center" style={{ position: "static" }}>
+              <th colSpan={6} className="text-center" style={{ position: "static" }}>
                 Declaration
               </th>
               <th colSpan={6} className="text-center border-l border-line" style={{ position: "static" }}>
@@ -307,11 +360,15 @@ export default function ImportsView() {
               <th colSpan={10} className="text-center border-l border-line" style={{ position: "static" }}>
                 Taxes as per customs (amount and MP code)
               </th>
+              <th className="text-center border-l border-line" style={{ position: "static" }}>
+                Notes
+              </th>
               <th colSpan={CUSTOMS_DOC_KINDS.length} className="text-center border-l border-line" style={{ position: "static" }}>
                 Documents
               </th>
             </tr>
             <tr>
+              <th>To complete</th>
               <th>File name</th>
               <th>Cusdec no</th>
               <th>Date</th>
@@ -337,6 +394,7 @@ export default function ImportsView() {
               <th className="num">VAT</th>
               <th>Type</th>
               <th>Code</th>
+              <th className="border-l border-line">Remarks</th>
               <CustomsDocHeadings perm={p} />
             </tr>
             <FilterRow state={cf} />
@@ -383,7 +441,10 @@ export default function ImportsView() {
         the imports check on the VAT reconciliation tab. Uploading the same CusDec and invoice number again replaces its
         lines. Each CusDec keeps four files, whether its lines came from the PDFs or a spreadsheet: the CusDec itself,
         the commercial invoice, the other documents (packing list, bill of lading) and all documents as one bundle; upload or open them
-        in the Documents columns.
+        in the Documents columns. A declaration tagged “To complete” was entered from a logbook rather than read from
+        its CusDec: the tag lists what is still missing. Uploading its CusDec (PDF or spreadsheet) replaces the tagged
+        lines, even when the logbook had no invoice number, and keeps documents already attached; or complete the
+        fields by hand and use “Mark complete”. Filter the To complete column with “yes” to list them.
         {p.edit &&
           " With edit permission the uploaded data can be corrected with “Edit uploaded data”: every column of every item line, with a declaration column (CusDec, date, month, invoice, supplier, currency, rate, invoice value) saved to all lines of its CusDec. Uploading that CusDec again replaces the corrections."}
       </div>

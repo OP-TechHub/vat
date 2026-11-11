@@ -366,9 +366,9 @@ export function parseExport(
 /**
  * Parse customs entries (CusDec lines) for exports or imports. Columns are matched by heading text:
  * Cusdec No, Date, Invoice No, Currency, Ex. Rate, Invoice Value (FC), Customs Value (LKR), VAT Amount
- * (imports), Consignee / Supplier, Description. A CusDec needs at least a CusDec number and an invoice
- * number. Blank Customs Value is taken as invoice value x rate. Rows repeating the same CusDec and
- * invoice keep the last. The sheet named like "customs" / "cusdec" is used, else the first.
+ * (imports), Consignee / Supplier, Description, To Complete (Yes tags the line), Remarks. A CusDec needs at
+ * least a CusDec number and, for exports, an invoice number (logbook imports may have none). Blank Customs
+ * Value is taken as invoice value x rate. Rows repeating the same CusDec, invoice and item keep the last. The sheet named like "customs" / "cusdec" is used, else the first.
  */
 export function parseCustoms(
   buf: ArrayBuffer | Uint8Array,
@@ -405,16 +405,21 @@ export function parseCustoms(
     desc: col(/description/, /goods/),
     m: col(/^month/),
     file: col(/file ?name/, /^file$/, /^pdf/),
+    tag: col(/to ?complete/, /incomplete/),
+    remarks: col(/remarks?/, /^notes?$/),
   };
-  if (c.cusdec < 0 || c.inv < 0)
-    throw new UploadError(`The file needs Cusdec No and Invoice No columns (sheet “${name}”).`);
+  const needInvoice = direction === "export";
+  if (c.cusdec < 0 || (needInvoice && c.inv < 0))
+    throw new UploadError(
+      `The file needs ${needInvoice ? "Cusdec No and Invoice No columns" : "a Cusdec No column"} (sheet “${name}”).`,
+    );
   const by = new Map<string, CustomsUploadRow>();
   let skipped = 0;
   for (const r of A.slice(hi + 1)) {
     const cusdec = xlText(r[c.cusdec]);
-    const inv = xlText(r[c.inv]);
+    const inv = c.inv < 0 ? "" : xlText(r[c.inv]);
     if (!cusdec && !inv) continue;
-    if (!cusdec || !inv || /^total/i.test(cusdec)) {
+    if (!cusdec || (needInvoice && !inv) || /^total/i.test(cusdec)) {
       skipped++;
       continue;
     }
@@ -453,18 +458,22 @@ export function parseCustoms(
       vat_type: text(c.vtype),
       vat_code: text(c.vcode),
       file_name: text(c.file),
+      to_complete: c.tag >= 0 && /^(y|yes|true|1|x)$/i.test(str(r[c.tag])),
+      remarks: text(c.remarks),
     });
   }
   const rows = [...by.values()];
   if (!rows.length) throw new UploadError(`No customs entries were found in sheet “${name}”.`);
   const value = cents(sum(rows, (r) => r.customs_value ?? 0));
+  const tagged = rows.filter((r) => r.to_complete).length;
   return {
     sheet: name,
     rows,
     skipped,
     text:
       `Sheet “${name}”: ${rows.length} ${direction} customs entries, customs value ${fmt(value)}.` +
-      (skipped ? ` ${skipped} rows without a CusDec or invoice number were left out.` : "") +
+      (tagged ? ` ${tagged} of them are tagged “To complete”.` : "") +
+      (skipped ? ` ${skipped} rows without a CusDec${needInvoice ? " or invoice" : ""} number were left out.` : "") +
       " Saving adds or updates these entries and fills the customs columns of matching invoices.",
   };
 }
@@ -489,6 +498,7 @@ export function customsTemplateWorkbook(direction: ReconDirection): XLSX.WorkBoo
       ? ["CID Amount", "CID Code", "PAL Amount", "PAL Code", "SSCL Amount", "SSCL Code", "VAT Base", "VAT Amount", "VAT Code"]
       : []),
     direction === "import" ? "Supplier" : "Consignee",
+    ...(direction === "import" ? ["To Complete", "Remarks"] : []),
   ];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([head]);
