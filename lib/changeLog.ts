@@ -6,6 +6,7 @@ import type { Db } from "./supabase/schema";
 import { DOC_LABEL } from "./documents";
 import { mLabel, monthKey } from "./format";
 import { TABS } from "./permissions";
+import { periodLabel } from "./submissions";
 import type { DocumentKind } from "./types";
 
 export type ChangeKind = "upload" | "edit" | "add" | "delete" | "document" | "members" | "undo";
@@ -152,6 +153,8 @@ export function rowLabel(r: ChangeRow): string {
       return `${DOC_LABEL[x.kind as DocumentKind] ?? x.kind} ${month(x.return_month)}`;
     case "ird_status":
       return `IRD status ${month(x.return_month)}`;
+    case "schedule_submissions":
+      return `Schedule submissions ${x.period_code} (${periodLabel(String(x.period_code))})`;
     case "company_members":
       return `Member ${r.subject_email ?? x.user_id}`;
     case "company_member_permissions":

@@ -4,7 +4,7 @@
  * enforces all of it through RLS and the upload_* functions; the UI only mirrors it.
  */
 
-export type TabKey = "summary" | "invoices" | "schedule" | "exports" | "imports" | "returns" | "filing" | "ird_status";
+export type TabKey = "summary" | "invoices" | "schedule" | "exports" | "imports" | "returns" | "filing" | "ird_status" | "submissions";
 export type Action = "upload" | "edit" | "delete";
 
 export interface Perm {
@@ -31,6 +31,7 @@ export const TABS: { key: TabKey; href: string; label: string; actions: Action[]
   { key: "returns", href: "/returns", label: "VAT reconciliation", actions: ["upload", "edit", "delete"] },
   { key: "filing", href: "/filing", label: "Return filing", actions: ["upload", "delete"] },
   { key: "ird_status", href: "/ird-status", label: "IRD status", actions: ["upload", "edit", "delete"] },
+  { key: "submissions", href: "/submissions", label: "Schedule submissions", actions: ["upload", "edit", "delete"] },
 ];
 
 export const ACTION_LABEL: Record<Action, string> = { upload: "Upload", edit: "Edit", delete: "Delete" };

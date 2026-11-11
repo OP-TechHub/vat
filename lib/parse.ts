@@ -4,7 +4,7 @@
  * Pure functions: no DOM, no storage, so they run in the browser and in unit tests.
  */
 import * as XLSX from "xlsx";
-import { MN, mLabel, fmt, sum, cents } from "./format";
+import { MN, mLabel, fmt, sum, cents, periodCode } from "./format";
 import {
   CAGES,
   type CageField,
@@ -16,6 +16,16 @@ import {
   type ScheduleUploadRow,
 } from "./types";
 import { kindsFromText, periodFromText, type IndexRow } from "./matchDocuments";
+import {
+  comparePeriods,
+  cusdecsAvailability,
+  isPeriodCode,
+  periodFromLabel,
+  periodLabel,
+  schedulesSubmitted,
+  submissionTotals,
+  type SubmissionRow,
+} from "./submissions";
 
 export type UploadKind = "ledger" | "schedule" | "export" | "import";
 
@@ -723,3 +733,146 @@ export function templateWorkbook(kind: UploadKind): XLSX.WorkBook {
 }
 
 export const templateFilename = (kind: UploadKind) => TEMPLATE[kind].file + " template.xlsx";
+
+/** Headings of the schedule submissions workbook, in its column order ("DVAT Plan"). */
+const SUBMISSION_HEAD = [
+  "Selected",
+  "Period Code",
+  "Month",
+  "Deferred Input VAT",
+  "Sch 1 Output",
+  "Sch 2 Input VAT",
+  "Sch 3 Import VAT",
+  "Sch 4 Credit/Debit Notes",
+  "Sch 6 Article Export",
+  "Sch 7 Service Export",
+  "Schedules Submitted",
+  "SVAT 06",
+  "RMI",
+  "Return Availability",
+  "Cusdecs Availability",
+  "Sch 6 CusDecs",
+  "CusDecs in Register",
+  "Remarks",
+];
+
+/**
+ * Parse the schedule submissions workbook. The heading row (with "Period Code") is found in the first 15 rows and
+ * columns are matched by heading. A row needs a period code (IRD YYQM), or a Month the code can be worked out
+ * from; title, note and "Periods submitted" rows are passed over. Schedules Submitted and Cusdecs Availability
+ * are worked out by the app, so those columns are not read. Sch 2 holds an amount, or text such as
+ * "No local purchases". A period given twice keeps its last row.
+ */
+export function parseSubmissions(buf: ArrayBuffer | Uint8Array): { sheet: string; rows: SubmissionRow[]; skipped: number; text: string } {
+  const wb = XLSX.read(buf, { type: "array", cellDates: false, raw: true });
+  const name = wb.SheetNames.find((n) => /submission|status|dvat|schedule/i.test(n)) || wb.SheetNames[0];
+  if (!name) throw new UploadError("The file has no worksheets.");
+  const A = XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[name], { header: 1, raw: true, defval: "" });
+  const { hi, col } = findHeader(A, /period ?code/i, "Period Code", name);
+  const c = {
+    selected: col(/^selected/, /tick/),
+    code: col(/period ?code/),
+    month: col(/^month/, /taxable period/),
+    deferred: col(/deferred/),
+    sch1: col(/^sch ?1\b/),
+    sch2: col(/^sch ?2\b/),
+    sch3: col(/^sch ?3\b/),
+    sch4: col(/^sch ?4\b/),
+    sch6: col(/^sch ?6 ?article/, /^sch ?6(?!.*cus ?dec)/),
+    sch7: col(/^sch ?7\b/),
+    svat: col(/svat/),
+    rmi: col(/^rmi/),
+    ret: col(/return ?avail/),
+    sch6c: col(/^sch ?6 ?cus ?decs?$/, /^sch ?6 cus ?dec/),
+    reg: col(/in register/),
+    remarks: col(/remarks?/, /^notes?$/),
+  };
+  const text = (r: Cell[], i: number) => (i < 0 ? null : str(r[i]) || null);
+  const amount = (r: Cell[], i: number) => (i < 0 ? null : numOrNull(r[i]));
+  const by = new Map<string, SubmissionRow>();
+  let skipped = 0;
+  for (const r of A.slice(hi + 1)) {
+    let code = c.code < 0 ? "" : str(r[c.code]).replace(/\.0+$/, "");
+    if (!isPeriodCode(code) && c.month >= 0) {
+      const m = r[c.month];
+      const d = typeof m === "number" ? xlDate(m) : "";
+      code = /^\d{4}-\d{2}/.test(d) ? periodCode(d.slice(0, 7)) : (periodFromLabel(str(m)) ?? code);
+    }
+    if (!isPeriodCode(code)) {
+      if (code && !/submitted|total/i.test(code)) skipped++;
+      continue;
+    }
+    const s2 = c.sch2 < 0 ? "" : r[c.sch2];
+    const s2n = numOrNull(s2);
+    by.set(code, {
+      period_code: code,
+      selected: c.selected >= 0 && (r[c.selected] === true || /^(true|yes|y|x|1|✓|✔)$/i.test(str(r[c.selected]))),
+      deferred_input_vat: amount(r, c.deferred),
+      sch1: text(r, c.sch1),
+      sch2_input_vat: s2n,
+      sch2_note: s2n == null ? str(s2) || null : null,
+      sch3: text(r, c.sch3),
+      sch4: text(r, c.sch4),
+      sch6: text(r, c.sch6),
+      sch7: text(r, c.sch7),
+      svat06: text(r, c.svat),
+      rmi: text(r, c.rmi),
+      return_availability: text(r, c.ret),
+      sch6_cusdecs: c.sch6c < 0 ? null : numOrNull(r[c.sch6c], 0),
+      cusdecs_in_register: c.reg < 0 ? null : numOrNull(r[c.reg], 0),
+      remarks: text(r, c.remarks),
+    });
+  }
+  const rows = [...by.values()].sort((a, b) => comparePeriods(b.period_code, a.period_code));
+  if (!rows.length) throw new UploadError(`No periods were found in sheet “${name}”. Each row needs a Period Code such as 2632.`);
+  return {
+    sheet: name,
+    rows,
+    skipped,
+    text:
+      `Sheet “${name}”: ${rows.length} period${rows.length === 1 ? "" : "s"} from ${periodLabel(rows[0].period_code)} ` +
+      `to ${periodLabel(rows[rows.length - 1].period_code)}.` +
+      (skipped ? ` ${skipped} row${skipped === 1 ? "" : "s"} without a valid period code ${skipped === 1 ? "was" : "were"} left out.` : ""),
+  };
+}
+
+/** The schedule submissions workbook: the template when `rows` is empty, else the periods with a totals row. */
+export function submissionsWorkbook(rows: SubmissionRow[], company = ""): XLSX.WorkBook {
+  const data: (string | number | boolean | null)[][] = rows.map((r) => [
+    r.selected,
+    Number(r.period_code),
+    periodLabel(r.period_code),
+    r.deferred_input_vat,
+    r.sch1,
+    r.sch2_input_vat ?? r.sch2_note,
+    r.sch3,
+    r.sch4,
+    r.sch6,
+    r.sch7,
+    `${schedulesSubmitted(r)} of 6`,
+    r.svat06,
+    r.rmi,
+    r.return_availability,
+    cusdecsAvailability(r),
+    r.sch6_cusdecs,
+    r.cusdecs_in_register,
+    r.remarks,
+  ]);
+  const aoa: (string | number | boolean | null)[][] = [
+    [`${company ? company + " — " : ""}VAT Schedule Submission Status by Period`],
+    ['"Submitted" = at least one record in RAMIS for that period. Schedules Submitted and Cusdecs Availability are worked out on upload.'],
+    SUBMISSION_HEAD,
+    ...data,
+  ];
+  if (rows.length) {
+    const t = submissionTotals(rows);
+    const of = (k: number) => `${k} of ${t.n}`;
+    aoa.push(["", "Periods submitted", "", of(t.deferred), of(t.sch1), of(t.sch2), of(t.sch3), of(t.sch4), of(t.sch6), of(t.sch7), "",
+      `${t.svat} of ${t.svatOf}`, "", of(t.returns), `${t.full} Full / ${t.partial} Partial / ${t.none} None`, "", "", ""]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = SUBMISSION_HEAD.map((h) => ({ wch: h === "Remarks" ? 40 : Math.max(12, h.length + 2) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Submission Status");
+  return wb;
+}

@@ -1,4 +1,5 @@
 import type { Db } from "./supabase/schema";
+import type { ScheduleSubmission } from "./submissions";
 import type {
   Company,
   CustomsEditable,
@@ -310,6 +311,13 @@ export interface IrdStatusData {
   returns: IrdStatusReturn[];
   statuses: IrdStatus[];
   vouchers: ReturnDocument[];
+}
+
+/** Schedule submission status of every period held (migration 0020). */
+export async function loadSubmissions(sb: Db, companyId: string): Promise<ScheduleSubmission[]> {
+  return fetchAll<ScheduleSubmission>((a, b) =>
+    sb.from("schedule_submissions").select("*").eq("company_id", companyId).order("period_code").range(a, b),
+  );
 }
 
 /** IRD status inputs for every period, not limited to the selected tax year. */
