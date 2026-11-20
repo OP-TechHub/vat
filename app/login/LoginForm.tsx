@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-type Mode = "signin" | "signup";
+type Mode = "signin" | "signup" | "forgot";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -13,7 +13,7 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(params.get("error"));
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -28,6 +28,17 @@ export default function LoginForm() {
     setError(null);
     setInfo(null);
     const supabase = createClient();
+
+    if (mode === "forgot") {
+      setBusy(true);
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: window.location.origin + "/auth/callback?next=/reset-password",
+      });
+      setBusy(false);
+      if (error) return setError(error.message);
+      setInfo("If an account exists for that email, a reset link is on its way. Open it in this same browser.");
+      return;
+    }
 
     if (mode === "signup") {
       if (password.length < 8) return setError("Use a password of at least 8 characters.");
@@ -92,18 +103,20 @@ export default function LoginForm() {
           onChange={(e) => setEmail(e.target.value)}
         />
       </label>
-      <label className="field">
-        Password
-        <input
-          className="control"
-          type="password"
-          autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          required
-          minLength={mode === "signup" ? 8 : undefined}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </label>
+      {mode !== "forgot" && (
+        <label className="field">
+          Password
+          <input
+            className="control"
+            type="password"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            required
+            minLength={mode === "signup" ? 8 : undefined}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+      )}
       {mode === "signup" && (
         <label className="field">
           Confirm password
@@ -120,8 +133,31 @@ export default function LoginForm() {
       {error && <div className="msg msg-err">{error}</div>}
       {info && <div className="msg">{info}</div>}
       <button className="btn btn-primary" type="submit" disabled={busy}>
-        {busy ? (mode === "signup" ? "Creating…" : "Signing in…") : mode === "signup" ? "Create account" : "Sign in"}
+        {mode === "forgot"
+          ? busy
+            ? "Sending…"
+            : "Send reset link"
+          : busy
+            ? mode === "signup"
+              ? "Creating…"
+              : "Signing in…"
+            : mode === "signup"
+              ? "Create account"
+              : "Sign in"}
       </button>
+      {mode !== "signup" && (
+        <button
+          type="button"
+          className="note underline self-start bg-transparent border-0 p-0 cursor-pointer"
+          onClick={() => {
+            setMode(mode === "forgot" ? "signin" : "forgot");
+            setError(null);
+            setInfo(null);
+          }}
+        >
+          {mode === "forgot" ? "Back to sign in" : "Forgot password?"}
+        </button>
+      )}
       {mode === "signup" && (
         <div className="note">
           Creating an account does not give access to any company. A company admin adds your email on the Members tab.
