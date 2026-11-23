@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
 import * as XLSX from "xlsx";
 import { useApp } from "./AppShell";
+import { customsPerm } from "@/lib/permissions";
 import { customsTemplateFilename, customsTemplateWorkbook, parseCustoms } from "@/lib/parse";
 import { downloadWorkbook } from "@/lib/download";
 import { CUSTOMS_DOC_KINDS, customsDoc, uploadCustomsDocument, type CustomsDocKind } from "@/lib/customsDocs";
@@ -132,7 +133,7 @@ export default function CustomsUpload({
   onDone?: () => void | Promise<void>;
 }) {
   const { supabase, company, reload, flash, perm } = useApp();
-  const canReplace = perm(direction === "export" ? "exports" : "imports").delete;
+  const canReplace = customsPerm(perm, direction).delete;
   const held = useMemo(() => heldDeclarations(entries), [entries]);
   const byKey = useMemo(() => new Map(held.map((d) => [d.key, d])), [held]);
   const [pending, setPending] = useState<Pending | null>(null);

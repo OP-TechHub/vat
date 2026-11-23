@@ -131,6 +131,9 @@ export default function AppShell({
   const currentModule = moduleOfPath(pathname);
   // The VAT year data is only needed inside the VAT module; other modules load their own.
   const inVat = currentModule === "vat";
+  // Registers shows the Import Register (the import customs entries) and works by tax year too.
+  const inRegisters = currentModule === "registers";
+  const byYear = inVat || inRegisters;
 
   const [ready, setReady] = useState(false);
   const [companyId, setCompanyId] = useState<string>(companies[0]?.id ?? "");
@@ -206,11 +209,14 @@ export default function AppShell({
             loadScheduleLines(supabase, companyId, year),
             loadReturns(supabase, companyId, year),
             optional(loadExportSales(supabase, companyId, year), "0004_export_sales.sql"),
-            optional(loadCustomsEntries(supabase, "import", companyId), "0008_customs_entries.sql"),
           ])
         : null;
-      const [vat, mods, access] = await Promise.all([
+      const importsData = byYear
+        ? optional(loadCustomsEntries(supabase, "import", companyId), "0008_customs_entries.sql")
+        : null;
+      const [vat, importEntries, mods, access] = await Promise.all([
         vatData,
+        importsData,
         // Before 0023 there were no modules: the app was VAT only.
         loadModules(supabase, companyId).catch((e: unknown) => {
           if (isMissingTable(e)) {
@@ -228,9 +234,13 @@ export default function AppShell({
         }),
       ]);
       if (id !== reqId.current) return;
-      if (vat) {
-        const [invoices, schedule, returns, exports, importEntries] = vat;
-        setData({ invoices, schedule, returns, exports, importEntries });
+      if (vat || importEntries) {
+        setData((d) => {
+          const next = { ...d };
+          if (vat) [next.invoices, next.schedule, next.returns, next.exports] = vat;
+          if (importEntries) next.importEntries = importEntries;
+          return next;
+        });
       }
       setEnabledModules(mods);
       setRole(access.role);
@@ -245,7 +255,7 @@ export default function AppShell({
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [supabase, companyId, year, user.id, inVat]);
+  }, [supabase, companyId, year, user.id, inVat, byYear]);
 
   useEffect(() => {
     if (ready) void reload();
@@ -378,22 +388,22 @@ export default function AppShell({
                 {!companies.length && <option value="">No companies</option>}
               </select>
             </label>
+            {byYear && (
+              <label className="field">
+                Tax year
+                <select className="control" value={year} onChange={(e) => setYear(+e.target.value)}>
+                  {years.map((y) => (
+                    <option key={y} value={y}>
+                      {yearLabel(y)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {inVat && (
-              <>
-                <label className="field">
-                  Tax year
-                  <select className="control" value={year} onChange={(e) => setYear(+e.target.value)}>
-                    {years.map((y) => (
-                      <option key={y} value={y}>
-                        {yearLabel(y)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button className="btn" type="button" onClick={exportExcel} disabled={loading || !company}>
-                  Export to Excel
-                </button>
-              </>
+              <button className="btn" type="button" onClick={exportExcel} disabled={loading || !company}>
+                Export to Excel
+              </button>
             )}
             <form action="/auth/signout" method="post" className="flex flex-col gap-1 items-end">
               <span className="text-xs text-muted truncate max-w-[200px]" title={user.email}>

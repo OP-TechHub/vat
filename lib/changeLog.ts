@@ -159,6 +159,10 @@ export function rowLabel(r: ChangeRow): string {
       return `IRD status ${month(x.return_month)}`;
     case "schedule_submissions":
       return `Schedule submissions ${x.period_code} (${periodLabel(String(x.period_code))})`;
+    case "sales_invoices":
+      return `${x.type} sales invoice ${x.invoice_no}`;
+    case "sales_invoice_lines":
+      return `${x.type} sales line ${x.line_no}${x.item_code ? ` (${x.item_code})` : ""}`;
     case "company_members":
       return `Member ${r.subject_email ?? x.user_id}`;
     case "company_member_permissions":
