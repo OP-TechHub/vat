@@ -1,5 +1,5 @@
-import ComingSoon from "@/components/ComingSoon";
+import TiepSummaryView from "@/components/tiep/TiepSummaryView";
 
 export default function Page() {
-  return <ComingSoon title="TIEP Summary">Totals of duty-suspended imports, cancellations and outstanding balances.</ComingSoon>;
+  return <TiepSummaryView />;
 }

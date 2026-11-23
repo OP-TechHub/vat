@@ -1,5 +1,5 @@
-import ComingSoon from "@/components/ComingSoon";
+import TiepRegisterView from "@/components/tiep/TiepRegisterView";
 
 export default function Page() {
-  return <ComingSoon title="TIEP Import Register">Import lines with their FIFO order, cancelled and planned quantities, balance and due dates.</ComingSoon>;
+  return <TiepRegisterView />;
 }

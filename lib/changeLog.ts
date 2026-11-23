@@ -163,6 +163,18 @@ export function rowLabel(r: ChangeRow): string {
       return `${x.type} sales invoice ${x.invoice_no}`;
     case "sales_invoice_lines":
       return `${x.type} sales line ${x.line_no}${x.item_code ? ` (${x.item_code})` : ""}`;
+    case "tiep_import_ext":
+      return `TIEP line ${x.legacy_id ?? `${x.cusdec_no} item ${x.item_no}`}`;
+    case "tiep_cancellations":
+      return `Cancellation ${x.ref} · CusDec ${x.cusdec_no} item ${x.item_no}`;
+    case "tiep_batches":
+      return `Local-sales batch ${x.name}`;
+    case "tiep_standards":
+      return `Conversion standard ${x.short ?? x.name}`;
+    case "tiep_skumap":
+      return `TIEP item master: ${x.code ? x.code + " " : ""}${x.item}`;
+    case "tiep_settings":
+      return "TIEP settings";
     case "company_members":
       return `Member ${r.subject_email ?? x.user_id}`;
     case "company_member_permissions":

@@ -1,5 +1,5 @@
-import ComingSoon from "@/components/ComingSoon";
+import TiepInvoicesView from "@/components/tiep/TiepInvoicesView";
 
 export default function Page() {
-  return <ComingSoon title="Local Sales Register">Local sales invoices grouped into MUDs for duty payment.</ComingSoon>;
+  return <TiepInvoicesView type="Local" />;
 }

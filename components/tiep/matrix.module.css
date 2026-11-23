@@ -1,0 +1,248 @@
+/* TIEP matrices (By customs entry, By cancellation entry): sticky first column, product group headers,
+   balance rows, expandable entries. Ported from the .mx rules of the TIEP Import Register app. */
+
+.mx th,
+.mx td {
+  white-space: nowrap;
+}
+
+/* One sticky header block (two rows in the products-as-columns layout), not one sticky row each. */
+.mx thead {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+.mx thead th {
+  position: static;
+  background: var(--surface);
+}
+.mx thead th.k1 {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+}
+
+.k1 {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 2;
+  box-shadow: 1px 0 0 var(--line);
+}
+.mx tfoot td.k1 {
+  background: var(--surface);
+}
+
+.prod {
+  text-align: right !important;
+  min-width: 104px;
+  white-space: normal !important;
+  vertical-align: bottom !important;
+}
+.prod small,
+.pg small {
+  display: block;
+  font-weight: 400;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.hsc {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  margin-top: 2px;
+}
+.pg {
+  text-align: center !important;
+  border-left: 2px solid var(--line);
+  white-space: normal !important;
+}
+.sc {
+  text-align: right !important;
+  font-size: 11px;
+  min-width: 86px;
+}
+.f {
+  border-left: 2px solid var(--line);
+}
+
+.z {
+  color: var(--line);
+}
+.wrap {
+  white-space: normal !important;
+}
+.neg {
+  color: var(--bad);
+  font-weight: 600;
+}
+.bcol {
+  font-weight: 600;
+}
+/* Import qty taken as 0 while import details are pending. */
+.q {
+  color: var(--accent);
+  font-weight: 600;
+}
+/* Planned (saved MUD / local-sales plan) and Pending confirmation (FIFO proposal) quantities. */
+.mx td.pl {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.mx td.px {
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.mx tr.first td {
+  border-top: 2px solid var(--line);
+}
+.mx tr.bal td,
+.mx tr.bal td.k1 {
+  background: var(--warn-soft);
+  font-weight: 600;
+}
+
+.mx tr.ent {
+  cursor: pointer;
+}
+.mx tr.ent:hover td {
+  background: var(--accent-soft);
+}
+.mx tr.ent.hasprop td.k1 {
+  box-shadow: inset 4px 0 0 var(--warn);
+}
+
+.mx tr.msub td {
+  background: var(--bg);
+  font-size: 12.5px;
+  color: var(--muted);
+  border-bottom: 1px dashed var(--line);
+}
+.mx tr.msub td.k1 {
+  background: var(--bg);
+  padding-left: 42px;
+}
+.mx tr.msub td:global(.num) {
+  color: var(--ink);
+}
+.mx tr.msub.last td {
+  border-bottom: 1px solid var(--line);
+}
+.mx tr.msub.det td {
+  font-size: 12px;
+}
+.mx tr.msub.det td.k1 {
+  font-family: var(--font-mono);
+}
+.mx tr.propr td {
+  background: color-mix(in srgb, var(--warn-soft) 55%, var(--surface));
+}
+.mx tr.lateimp td {
+  background: var(--bad-soft) !important;
+}
+
+.xbtn {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  line-height: 18px;
+  padding: 0;
+  margin-right: 8px;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+  vertical-align: middle;
+}
+.xbtn:hover {
+  border-color: var(--accent);
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center !important;
+  padding: 28px !important;
+}
+
+/* Product multi-select. */
+.pick {
+  position: relative;
+}
+.pick summary {
+  list-style: none;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 28px 6px 8px;
+  font-size: 13px;
+  color: var(--ink);
+  min-width: 190px;
+  position: relative;
+}
+.pick summary::-webkit-details-marker {
+  display: none;
+}
+.pick summary::after {
+  content: "\25BE";
+  position: absolute;
+  right: 9px;
+  top: 6px;
+  color: var(--muted);
+}
+.pickPanel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  min-width: 240px;
+  display: grid;
+  gap: 4px;
+}
+.pickPanel label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--ink);
+  padding: 3px 0;
+  cursor: pointer;
+}
+.pickPanel label.pickAll {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+/* Segmented toggle. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.seg button {
+  border: none;
+  background: var(--surface);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+.seg button + button {
+  border-left: 1px solid var(--line);
+}
+.seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
