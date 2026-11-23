@@ -166,6 +166,75 @@ body {
   .tbl tr.total td {
     @apply font-semibold border-t-2 border-t-line;
   }
+  /* TIEP: status chips, progress bars, tiles and dialogs. */
+  .chip {
+    @apply inline-block text-[11.5px] font-semibold px-2 py-px rounded-full border border-line text-muted whitespace-nowrap;
+  }
+  .chip-open {
+    @apply bg-warn-soft text-warn border-transparent;
+  }
+  .chip-part,
+  .chip-plan {
+    @apply bg-accent-soft text-accent border-transparent;
+  }
+  .chip-full,
+  .chip-done {
+    @apply bg-good-soft text-good border-transparent;
+  }
+  .chip-bad {
+    @apply bg-bad-soft text-bad border-transparent;
+  }
+  .chip-pend {
+    @apply border-dashed border-accent text-accent;
+  }
+  .pbar {
+    @apply h-1.5 rounded bg-line overflow-hidden min-w-[70px];
+  }
+  .pbar > i {
+    @apply block h-full bg-accent;
+  }
+  .tiles {
+    @apply grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))];
+  }
+  .tile {
+    @apply bg-surface border border-line rounded-md px-3.5 py-3 border-l-4;
+  }
+  .tile .k {
+    @apply text-xs text-muted;
+  }
+  .tile .v {
+    @apply text-[21px] font-semibold tabular-nums mt-0.5;
+  }
+  .tile .x {
+    @apply text-xs text-muted tabular-nums;
+  }
+  .tile.a {
+    @apply border-l-accent;
+  }
+  .tile.w {
+    @apply border-l-warn;
+  }
+  .tile.b {
+    @apply border-l-bad;
+  }
+  dialog.modal {
+    @apply border border-line rounded-lg p-0 bg-surface text-ink w-[min(880px,calc(100%-32px))] max-h-[calc(100%-48px)];
+  }
+  dialog.modal.wide {
+    @apply w-[min(1280px,calc(100%-32px))];
+  }
+  dialog.modal::backdrop {
+    background: rgba(5, 15, 20, 0.45);
+  }
+  .tbl tr.clickable {
+    @apply cursor-pointer;
+  }
+  .tbl tr.clickable:hover td {
+    @apply bg-accent-soft;
+  }
+  .tbl tr.sub td {
+    @apply bg-bg text-[12.5px];
+  }
   /* Month heading row inside a register table. */
   .tbl tr.group td {
     @apply bg-accent-soft text-accent font-semibold;

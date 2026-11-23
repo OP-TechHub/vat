@@ -1,5 +1,5 @@
-import ComingSoon from "@/components/ComingSoon";
+import TiepLedgerView from "@/components/tiep/TiepLedgerView";
 
 export default function Page() {
-  return <ComingSoon title="Cancellation Ledger">Every cancellation posted against import lines.</ComingSoon>;
+  return <TiepLedgerView />;
 }

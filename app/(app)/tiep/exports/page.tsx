@@ -1,5 +1,5 @@
-import ComingSoon from "@/components/ComingSoon";
+import TiepInvoicesView from "@/components/tiep/TiepInvoicesView";
 
 export default function Page() {
-  return <ComingSoon title="Exports Register">Export invoices, their raw-material consumption and MUD forms.</ComingSoon>;
+  return <TiepInvoicesView type="Export" />;
 }
