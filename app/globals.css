@@ -166,6 +166,10 @@ body {
   .tbl tr.total td {
     @apply font-semibold border-t-2 border-t-line;
   }
+  /* Month heading row inside a register table. */
+  .tbl tr.group td {
+    @apply bg-accent-soft text-accent font-semibold;
+  }
   .tbl td select,
   .tbl td input {
     @apply px-1 py-0.5 text-xs;

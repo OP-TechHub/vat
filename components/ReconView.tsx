@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
 import CustomsUpload from "./CustomsUpload";
@@ -473,21 +474,36 @@ export default function ReconView({
 
   return (
     <>
-      {p.upload && (
-        <>
-          <UploadPanel
-            kind={direction}
-            month={upMonth || months[0]}
-            onMonthChange={setUpMonth}
-            existingCount={countFor}
-            canReplace={p.delete}
-            onSaved={(m) => {
-              setFrom(m);
-              setTo(m);
-            }}
-          />
-          <CustomsUpload direction={direction} entries={entries} onDone={() => setDocTick((n) => n + 1)} />
-        </>
+      {direction === "export" ? (
+        // Export sales invoices and export CusDecs are uploaded once in Registers › Export Register; their
+        // figures arrive here automatically.
+        (p.upload || perm("reg_exports").upload) && (
+          <div className="note">
+            Export sales invoices and export CusDecs are uploaded in{" "}
+            <Link href="/registers/exports" className="underline">
+              Registers › Export Register
+            </Link>
+            . Each invoice is added here in its invoice month with its FOB amount, and the customs columns fill from
+            its CusDec.
+          </div>
+        )
+      ) : (
+        p.upload && (
+          <>
+            <UploadPanel
+              kind={direction}
+              month={upMonth || months[0]}
+              onMonthChange={setUpMonth}
+              existingCount={countFor}
+              canReplace={p.delete}
+              onSaved={(m) => {
+                setFrom(m);
+                setTo(m);
+              }}
+            />
+            <CustomsUpload direction={direction} entries={entries} onDone={() => setDocTick((n) => n + 1)} />
+          </>
+        )
       )}
 
       <div className="bar">
@@ -648,7 +664,10 @@ export default function ReconView({
         </table>
       </div>
       <div className="note">
-        The first five columns come from the uploaded {t.report}, or are entered by hand with “Add invoice by hand”. The customs columns are filled automatically from
+        {isImport
+          ? <>The first five columns come from the uploaded {t.report}, or are entered by hand with “Add invoice by hand”.</>
+          : <>The first five columns come from the Export Register (each invoice’s FOB: product lines, charges left out), from the old monthly {t.report} for earlier months, or are entered by hand with “Add invoice by hand”. A re-uploaded register invoice updates the rows it added; rows from the old monthly {t.report} keep their figures.</>}{" "}
+        The customs columns are filled automatically from
         uploaded customs entries with the same invoice number, or entered by hand. A customs entry whose invoice is
         not in any uploaded {t.report} is listed under its CusDec month with the first columns blank until that
         month’s report is uploaded; typing an amount, rate or net value in those blank columns adds the invoice to

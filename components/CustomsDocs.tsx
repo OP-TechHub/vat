@@ -12,7 +12,7 @@ import {
   uploadCustomsDocument,
   type CustomsDocKind,
 } from "@/lib/customsDocs";
-import type { Perm } from "@/lib/permissions";
+import { customsPerm, type Perm } from "@/lib/permissions";
 import type { CustomsEntry, ReconDirection } from "@/lib/types";
 
 /** Filter boxes of the document columns. */
@@ -92,7 +92,7 @@ interface HeldDoc {
  */
 export function useCustomsDocs(direction: ReconDirection, onChanged: () => void | Promise<void>) {
   const { supabase, company, perm, flash } = useApp();
-  const p = perm(direction === "export" ? "exports" : "imports");
+  const p = customsPerm(perm, direction);
   const [busyId, setBusyId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const target = useRef<{ entry: CustomsEntry; kind: CustomsDocKind } | null>(null);

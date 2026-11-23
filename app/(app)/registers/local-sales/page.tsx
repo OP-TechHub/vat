@@ -1,5 +1,5 @@
-import ComingSoon from "@/components/ComingSoon";
+import SalesRegisterView from "@/components/SalesRegisterView";
 
 export default function Page() {
-  return <ComingSoon title="Local Sales Register">The Business Central local sales list will be uploaded here and shared with TIEP.</ComingSoon>;
+  return <SalesRegisterView type="Local" />;
 }

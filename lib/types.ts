@@ -223,6 +223,10 @@ export interface ExportSale {
   short_shipment: number | null;
   sales_reversed: number | null;
   updated_in_custom_report: string | null;
+  /** Export Register invoice this row belongs to (migration 0024). */
+  sales_invoice_id?: string | null;
+  /** The row was added by the Export Register and follows its figures; otherwise it came from the old monthly upload. */
+  from_register?: boolean;
   created_at: string;
   created_by: string | null;
   updated_at: string | null;

@@ -30,6 +30,16 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 - Manual override per invoice: a specific claimed month, or force "Not claimed". Auto applies when neither is set.
 - Status is always derived (the view), never stored.
 
+## Modules (migrations 0023, 0024)
+After sign-in the top level is **Registers | VAT | TIEP**; each opens its own tabs. A module shows when it is switched on for the company (`company_modules`, Members › Modules) and the user may view at least one of its tabs. VAT tabs live under `/vat/…` (old paths redirect).
+
+**Registers** is the one place the source registers are uploaded (tax-year selector in the header):
+- **Import Register** (`reg_imports`): import CusDecs, the same `customs_entries` lines VAT › Import Register shows. VAT › Import Register no longer uploads; it links here.
+- **Export Register** (`reg_exports`): the Business Central export sales line list (`sales_invoices` + `sales_invoice_lines`, `upload_sales_invoices`), grouped by invoice; plus the export CusDecs (`customs_entries`, direction export). Charge lines (BC line Type other than Item, service codes SE…, or freight / insurance / charges in the description) are flagged and left out of FOB; the flag can be corrected per line (`set_sales_line_charge`). Each export invoice adds its row to Export reconciliation in its invoice month (amount FC = FOB FC, net sales = FOB LKR, ex. rate = FOB LKR / FOB FC) and the customs columns fill from its CusDec (`apply_customs`). A row the register added (`from_register`) follows later uploads; a row from the old monthly sales report keeps its figures and is only linked (`sales_invoice_id`). Export reconciliation has no upload of its own.
+- **Local Sales Register** (`reg_local`): the BC local sales line list, same tables with type Local; amounts are LKR.
+- Re-uploading an invoice updates it (blank header fields keep what is held, lines are replaced by line number) and needs delete as well as upload. Pounds are converted to kg at 0.454 (original kept in qty_in / uom_in).
+- Customs entries may be uploaded, edited and given documents with the permission of either the Registers tab or the VAT tab of their direction (`customs_perm`).
+
 ## Screens
 1. **Sign in**, then a company switcher (only companies the user belongs to) and a tax-year selector (e.g. 2026/27 = Apr 2026 to Mar 2027).
 2. **Summary**
@@ -80,6 +90,7 @@ A web app for tracking which input VAT invoices in the ledger have been claimed 
 - Ledger: sheet "Invoice Listing"; Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY), Source Currency Amount.
 - Schedule: Month, Serial No, Invoice Date, Tax Invoice No, Supplier's TIN, Name of the Supplier, Description, Value of purchase, VAT Amount.
 - Export sales report: Invoice No, Month, Amount FC (FOB) USD / EUR, Ex.rate, Net Sales (A), then optionally Cusdec No, Date, Month, Currency Type, Ex. Rate Custom LKR, Invoice Value as Per USD / EUR, Custom Value, Short Shipment (3), Sales Reversed in the Month (4), Updated in Custom Report. A group-heading row above the column headings and month subtotal rows are ignored.
+- Sales line list (Registers › Export / Local Sales, BC): Document No. (or Invoice No), Posting Date, Item No. (No.) or Description, Quantity (or Net Wt; "lbs" in the heading or a LB unit converts to kg), and Amount / Amount (LCY); optionally Customer Name, Type (Item / G/L Account …), Unit of Measure, Unit Price, Currency Code, Exchange Rate, Export CusDec, Boxes, Gross, Market (Export / Local: other market's rows skipped). Header within the first 20 rows of any sheet; total rows skipped.
 - Find the header row within the first 15 rows; match columns by heading text, not position. Accept Excel serial dates and dd.mm.yyyy / dd/mm/yyyy / yyyy-mm-dd text. Accept .xlsx, .xls, .csv.
 
 ## Permissions

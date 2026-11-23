@@ -172,6 +172,16 @@ export function visibleModules(enabled: ModuleKey[], perms: PermMap): ModuleKey[
   );
 }
 
+/**
+ * Access to customs entries of a direction (migration 0024): the VAT tab of the direction or its Registers
+ * tab, whichever allows more.
+ */
+export function customsPerm(perm: (tab: TabKey) => Perm, direction: "export" | "import"): Perm {
+  const a = perm(direction === "export" ? "exports" : "imports");
+  const b = perm(direction === "export" ? "reg_exports" : "reg_imports");
+  return { view: a.view || b.view, upload: a.upload || b.upload, edit: a.edit || b.edit, delete: a.delete || b.delete };
+}
+
 /** Permission rows for a preset: view on every tab, or everything on every tab. */
 export function presetRows(preset: "viewer" | "editor"): TabPermRow[] {
   return TABS.map((t) => ({

@@ -32,7 +32,7 @@ export default function ModuleHome() {
         return (
           <Link key={m} href={firstTab(m)} className="panel no-underline hover:border-accent">
             <h2 className="text-[17px] font-semibold m-0">{d.label}</h2>
-            <div className="text-[13px] text-muted">{d.title}</div>
+            {d.title !== d.label && <div className="text-[13px] text-muted">{d.title}</div>}
             <p className="note m-0">{d.description}</p>
           </Link>
         );

@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { yearRange } from "./format";
 import type { ModuleKey, TabPermRow } from "./permissions";
+import type { SalesInvoice, SalesLine, SalesType } from "./sales";
 
 const PAGE = 1000;
 
@@ -378,4 +379,34 @@ export async function reloadInvoice(sb: Db, id: string): Promise<Invoice> {
   const { data, error } = await sb.from("invoice_claim_status").select("*").eq("id", id).single();
   if (error) throw new Error(error.message);
   return data as Invoice;
+}
+
+/** Sales invoices of a register (Export or Local), oldest first, without their lines. */
+export function loadSalesInvoices(sb: Db, companyId: string, type: SalesType): Promise<SalesInvoice[]> {
+  return fetchAll<SalesInvoice>((from, to) =>
+    sb
+      .from("sales_invoices")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("type", type)
+      .order("invoice_date", { ascending: true, nullsFirst: true })
+      .order("invoice_no")
+      .range(from, to),
+  );
+}
+
+/** Every line of a register's invoices, by invoice and line number. */
+export function loadSalesLines(sb: Db, companyId: string, type: SalesType): Promise<SalesLine[]> {
+  return fetchAll<SalesLine>((from, to) =>
+    sb
+      .from("sales_invoice_lines")
+      .select(
+        "id,invoice_id,line_no,line_date,item_code,description,qty,uom,qty_in,uom_in,boxes,gross,unit_price,amount_fc,amount_lkr,is_charge",
+      )
+      .eq("company_id", companyId)
+      .eq("type", type)
+      .order("invoice_id")
+      .order("line_no")
+      .range(from, to),
+  );
 }

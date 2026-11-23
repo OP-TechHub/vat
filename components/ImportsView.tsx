@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useApp } from "./AppShell";
 import CustomsUpload from "./CustomsUpload";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
@@ -80,9 +81,14 @@ const qty = (n: number | null | undefined) =>
  * grouped by CusDec month within the selected tax year, with the stored CusDec file. Entries come
  * from the CusDec PDF / spreadsheet upload above the table.
  */
-export default function ImportsView() {
-  const { supabase, company, months, data, loading, perm, reload, flash } = useApp();
-  const p = perm("imports");
+/**
+ * The Import Register: import customs entries (CusDec item lines). Registers › Import Register is where they
+ * are uploaded; VAT › Import Register shows the same lines for the VAT work and links to Registers to upload.
+ */
+export default function ImportsView({ mode = "vat" }: { mode?: "vat" | "registers" }) {
+  const { supabase, company, months, data, loading, perm, reload, flash, enabledModules } = useApp();
+  const p = perm(mode === "registers" ? "reg_imports" : "imports");
+  const canUploadInRegisters = enabledModules.includes("registers") && perm("reg_imports").upload;
   // CusDec, commercial invoice, other documents and all documents of each declaration, shared by its item lines.
   const docs = useCustomsDocs("import", reload);
   const entries = data.importEntries;
@@ -285,7 +291,19 @@ export default function ImportsView() {
 
   return (
     <>
-      {p.upload && <CustomsUpload direction="import" entries={entries} />}
+      {mode === "registers" ? (
+        p.upload && <CustomsUpload direction="import" entries={entries} />
+      ) : (
+        canUploadInRegisters && (
+          <div className="note">
+            CusDecs are uploaded in{" "}
+            <Link href="/registers/imports" className="underline">
+              Registers › Import Register
+            </Link>
+            ; they show here as soon as they are saved.
+          </div>
+        )
+      )}
 
       <div className="bar">
         <label className="field">
