@@ -5,7 +5,6 @@ import { useApp } from "./AppShell";
 import UploadPanel from "./UploadPanel";
 import CustomsUpload from "./CustomsUpload";
 import AddReconRow from "./AddReconRow";
-import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
 import {
   CustomsDocHeadings,
@@ -487,8 +486,7 @@ export default function ReconView({
               setTo(m);
             }}
           />
-          <CustomsUpload direction={direction} />
-          <BulkCustomsDocs direction={direction} entries={entries} onDone={() => setDocTick((n) => n + 1)} />
+          <CustomsUpload direction={direction} entries={entries} onDone={() => setDocTick((n) => n + 1)} />
         </>
       )}
 

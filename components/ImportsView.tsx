@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useApp } from "./AppShell";
 import CustomsUpload from "./CustomsUpload";
-import BulkCustomsDocs from "./BulkCustomsDocs";
 import CellInput, { EditSwitch, parseCellNumber } from "./CellInput";
 import {
   CustomsDocHeadings,
@@ -286,8 +285,7 @@ export default function ImportsView() {
 
   return (
     <>
-      {p.upload && <CustomsUpload direction="import" />}
-      {p.upload && <BulkCustomsDocs direction="import" entries={entries} onDone={reload} />}
+      {p.upload && <CustomsUpload direction="import" entries={entries} />}
 
       <div className="bar">
         <label className="field">
