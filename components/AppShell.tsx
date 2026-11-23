@@ -14,8 +14,29 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Db } from "@/lib/supabase/schema";
 import { createClient } from "@/lib/supabase/client";
-import { loadAccess, loadCustomsEntries, loadExportSales, loadInvoices, loadReturns, loadScheduleLines } from "@/lib/data";
-import { NO_ACCESS, TABS, permMap, tabOfPath, type Perm, type TabKey, type TabPermRow } from "@/lib/permissions";
+import {
+  loadAccess,
+  loadCustomsEntries,
+  loadExportSales,
+  loadInvoices,
+  loadModules,
+  loadReturns,
+  loadScheduleLines,
+} from "@/lib/data";
+import {
+  MODULES,
+  NO_ACCESS,
+  moduleDef,
+  moduleOfPath,
+  permMap,
+  tabOfPath,
+  tabsOf,
+  visibleModules,
+  type ModuleKey,
+  type Perm,
+  type TabKey,
+  type TabPermRow,
+} from "@/lib/permissions";
 import { runHousekeeping } from "@/lib/changeLog";
 import { BUCKET } from "@/lib/documents";
 import { monthsOf, taxYearOf, yearLabel } from "@/lib/format";
@@ -49,6 +70,12 @@ export interface AppState {
   isAdmin: boolean;
   /** What the user may do on a tab of the selected company. */
   perm: (tab: TabKey) => Perm;
+  /** Modules switched on for the selected company. */
+  enabledModules: ModuleKey[];
+  /** Modules the user can open: switched on, with at least one tab they may view. */
+  modules: ModuleKey[];
+  /** Module of the current page, if any (null on the home page, Members and Log). */
+  module: ModuleKey | null;
   data: YearData;
   /** Only the invoices posted within the selected tax year. */
   yearInvoices: Invoice[];
@@ -101,12 +128,16 @@ export default function AppShell({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const pathname = usePathname();
+  const currentModule = moduleOfPath(pathname);
+  // The VAT year data is only needed inside the VAT module; other modules load their own.
+  const inVat = currentModule === "vat";
 
   const [ready, setReady] = useState(false);
   const [companyId, setCompanyId] = useState<string>(companies[0]?.id ?? "");
   const [year, setYearState] = useState<number>(currentTaxYear());
   const [role, setRole] = useState<Role | null>(null);
   const [permRows, setPermRows] = useState<TabPermRow[]>([]);
+  const [enabledModules, setEnabledModules] = useState<ModuleKey[]>([]);
   const [data, setData] = useState<YearData>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(loadError);
@@ -148,6 +179,7 @@ export default function AppShell({
       setData(EMPTY);
       setRole(null);
       setPermRows([]);
+      setEnabledModules([]);
       setLoading(false);
       return;
     }
@@ -168,12 +200,25 @@ export default function AppShell({
         });
       // Tables the user has no access to come back empty (row level security), which is what the
       // Summary and VAT reconciliation should then show for them.
-      const [invoices, schedule, returns, exports, importEntries, access] = await Promise.all([
-        loadInvoices(supabase, companyId, year),
-        loadScheduleLines(supabase, companyId, year),
-        loadReturns(supabase, companyId, year),
-        optional(loadExportSales(supabase, companyId, year), "0004_export_sales.sql"),
-        optional(loadCustomsEntries(supabase, "import", companyId), "0008_customs_entries.sql"),
+      const vatData = inVat
+        ? Promise.all([
+            loadInvoices(supabase, companyId, year),
+            loadScheduleLines(supabase, companyId, year),
+            loadReturns(supabase, companyId, year),
+            optional(loadExportSales(supabase, companyId, year), "0004_export_sales.sql"),
+            optional(loadCustomsEntries(supabase, "import", companyId), "0008_customs_entries.sql"),
+          ])
+        : null;
+      const [vat, mods, access] = await Promise.all([
+        vatData,
+        // Before 0023 there were no modules: the app was VAT only.
+        loadModules(supabase, companyId).catch((e: unknown) => {
+          if (isMissingTable(e)) {
+            missing.push("0023_modules.sql");
+            return ["vat"] as ModuleKey[];
+          }
+          throw e;
+        }),
         loadAccess(supabase, companyId, user.id).catch((e: unknown) => {
           if (isMissingTable(e)) {
             missing.push("0014_tab_permissions.sql");
@@ -183,7 +228,11 @@ export default function AppShell({
         }),
       ]);
       if (id !== reqId.current) return;
-      setData({ invoices, schedule, returns, exports, importEntries });
+      if (vat) {
+        const [invoices, schedule, returns, exports, importEntries] = vat;
+        setData({ invoices, schedule, returns, exports, importEntries });
+      }
+      setEnabledModules(mods);
       setRole(access.role);
       setPermRows(access.perms);
       if (missing.length)
@@ -196,7 +245,7 @@ export default function AppShell({
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [supabase, companyId, year, user.id]);
+  }, [supabase, companyId, year, user.id, inVat]);
 
   useEffect(() => {
     if (ready) void reload();
@@ -230,9 +279,12 @@ export default function AppShell({
   const isAdmin = role === "admin";
   const perms = useMemo(() => permMap(isAdmin, permRows), [isAdmin, permRows]);
   const perm = useCallback((tab: TabKey) => perms[tab] ?? NO_ACCESS, [perms]);
-  const visibleTabs = TABS.filter((t) => perms[t.key].view);
+  const modules = useMemo(() => visibleModules(enabledModules, perms), [enabledModules, perms]);
+  const firstTabOf = (m: ModuleKey) => tabsOf(m).find((t) => perms[t.key].view);
+  const moduleTabs = currentModule ? tabsOf(currentModule).filter((t) => perms[t.key].view) : [];
   const currentTab = tabOfPath(pathname);
-  const blocked = !loading && !!company && currentTab != null && !perms[currentTab].view;
+  const moduleOff = !loading && !!company && currentModule != null && !enabledModules.includes(currentModule);
+  const blocked = !loading && !!company && !moduleOff && currentTab != null && !perms[currentTab].view;
 
   // Once per company and session, an admin's browser deletes archived documents whose 30 days are up
   // and log entries older than 5 years. Failures are ignored; the next admin visit tries again.
@@ -270,6 +322,9 @@ export default function AppShell({
     role,
     isAdmin,
     perm,
+    enabledModules,
+    modules,
+    module: currentModule,
     data,
     yearInvoices,
     loading,
@@ -282,19 +337,28 @@ export default function AppShell({
     flash,
   };
 
+  const adminLinks = isAdmin ? ADMIN_TABS : [];
+  const here = (href: string) => pathname === href || pathname.startsWith(href + "/");
+  const title = currentModule ? moduleDef(currentModule).title : (company?.name ?? "Registers, VAT and TIEP");
+
   return (
     <Ctx.Provider value={state}>
       <div className="max-w-[1280px] mx-auto px-4 pt-5 pb-12 flex flex-col gap-4">
         <header className="flex flex-wrap gap-3 items-end justify-between">
           <div>
-            <h1 className="text-[22px] font-semibold m-0">VAT Input Claims Register</h1>
+            <h1 className="text-[22px] font-semibold m-0">
+              <Link href="/" className="no-underline text-inherit" title="Home">
+                {title}
+              </Link>
+            </h1>
             <div className="note">
               {loading
                 ? "Loading records…"
-                : company
-                  ? `${yearInvoices.length} ledger invoices held for ${yearLabel(year)}` +
-                    (role ? ` · ${role}` : "")
-                  : "You are not a member of any company yet."}
+                : !company
+                  ? "You are not a member of any company yet."
+                  : inVat
+                    ? `${yearInvoices.length} ledger invoices held for ${yearLabel(year)}` + (role ? ` · ${role}` : "")
+                    : company.name + (role ? ` · ${role}` : "")}
             </div>
           </div>
           <div className="bar">
@@ -314,19 +378,23 @@ export default function AppShell({
                 {!companies.length && <option value="">No companies</option>}
               </select>
             </label>
-            <label className="field">
-              Tax year
-              <select className="control" value={year} onChange={(e) => setYear(+e.target.value)}>
-                {years.map((y) => (
-                  <option key={y} value={y}>
-                    {yearLabel(y)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="btn" type="button" onClick={exportExcel} disabled={loading || !company}>
-              Export to Excel
-            </button>
+            {inVat && (
+              <>
+                <label className="field">
+                  Tax year
+                  <select className="control" value={year} onChange={(e) => setYear(+e.target.value)}>
+                    {years.map((y) => (
+                      <option key={y} value={y}>
+                        {yearLabel(y)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button className="btn" type="button" onClick={exportExcel} disabled={loading || !company}>
+                  Export to Excel
+                </button>
+              </>
+            )}
             <form action="/auth/signout" method="post" className="flex flex-col gap-1 items-end">
               <span className="text-xs text-muted truncate max-w-[200px]" title={user.email}>
                 {user.email}
@@ -338,18 +406,36 @@ export default function AppShell({
           </div>
         </header>
 
-        <nav className="flex flex-wrap gap-1 border-b border-line" aria-label="Sections">
-          {[...visibleTabs, ...(isAdmin ? ADMIN_TABS : [])].map((t) => (
+        {/* Top level: the modules, then the admin pages. */}
+        <nav className="flex flex-wrap gap-1 border-b border-line" aria-label="Modules">
+          {MODULES.filter((m) => modules.includes(m.key)).map((m) => (
             <Link
-              key={t.href}
-              href={t.href}
-              className="tab"
-              aria-current={pathname === t.href || pathname.startsWith(t.href + "/") ? "page" : undefined}
+              key={m.key}
+              href={firstTabOf(m.key)?.href ?? m.base}
+              className="tab module-tab"
+              aria-current={currentModule === m.key ? "page" : undefined}
             >
+              {m.label}
+            </Link>
+          ))}
+          {adminLinks.length > 0 && <span className="flex-1" />}
+          {adminLinks.map((t) => (
+            <Link key={t.href} href={t.href} className="tab" aria-current={here(t.href) ? "page" : undefined}>
               {t.label}
             </Link>
           ))}
         </nav>
+
+        {/* Second level: the tabs of the open module. */}
+        {currentModule && moduleTabs.length > 0 && !moduleOff && (
+          <nav className="flex flex-wrap gap-1 border-b border-line -mt-2" aria-label={`${moduleDef(currentModule).label} tabs`}>
+            {moduleTabs.map((t) => (
+              <Link key={t.href} href={t.href} className="tab" aria-current={here(t.href) ? "page" : undefined}>
+                {t.label}
+              </Link>
+            ))}
+          </nav>
+        )}
 
         {error && <div className="msg msg-err">{error}</div>}
         {flashMsg && (
@@ -359,15 +445,24 @@ export default function AppShell({
         )}
 
         <main className="flex flex-col gap-4">
-          {blocked ? (
+          {moduleOff ? (
+            <div className="panel note">
+              {moduleDef(currentModule!).title} is not switched on for {company?.name}.
+              {isAdmin ? " Switch it on in Members › Modules." : " Ask a company admin to switch it on."}{" "}
+              <Link href="/" className="underline">
+                Back to home
+              </Link>
+              .
+            </div>
+          ) : blocked ? (
             <div className="panel note">
               You do not have access to this tab for {company?.name}.
-              {visibleTabs.length ? (
+              {moduleTabs.length ? (
                 <>
                   {" "}
                   Go to{" "}
-                  <Link href={visibleTabs[0].href} className="underline">
-                    {visibleTabs[0].label}
+                  <Link href={moduleTabs[0].href} className="underline">
+                    {moduleTabs[0].label}
                   </Link>
                   .
                 </>

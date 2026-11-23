@@ -5,7 +5,7 @@
 import type { Db } from "./supabase/schema";
 import { DOC_LABEL } from "./documents";
 import { mLabel, monthKey } from "./format";
-import { TABS } from "./permissions";
+import { TABS, moduleDef } from "./permissions";
 import { periodLabel } from "./submissions";
 import type { DocumentKind } from "./types";
 
@@ -62,10 +62,14 @@ export const PAGE_SIZE = 100;
 
 /** Tab names, including Members, which has no entry in TABS. */
 export function tabLabel(tab: string): string {
-  return tab === "members" ? "Members" : (TABS.find((t) => t.key === tab)?.label ?? tab);
+  if (tab === "members") return "Members";
+  const t = TABS.find((x) => x.key === tab);
+  if (!t) return tab;
+  // Registers and TIEP reuse VAT tab names (Import Register), so name their module too.
+  return t.module === "vat" ? t.label : `${moduleDef(t.module).label} › ${t.label}`;
 }
 
-export const LOG_TABS: string[] = [...TABS.filter((t) => t.key !== "summary").map((t) => t.key as string), "members"];
+export const LOG_TABS: string[] = [...TABS.filter((t) => t.actions.length > 0).map((t) => t.key as string), "members"];
 
 export async function loadChangeSets(sb: Db, companyId: string, f: LogFilters, before?: number): Promise<ChangeSet[]> {
   const { data, error } = await sb.rpc("change_log_list", {

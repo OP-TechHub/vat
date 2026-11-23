@@ -4,12 +4,15 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { useApp } from "./AppShell";
 import {
   ACTION_LABEL,
+  MODULES,
   NO_ACCESS,
   TABS,
   permMap,
   presetRows,
   type Action,
+  type ModuleKey,
   type PermMap,
+  type TabDef,
   type TabKey,
   type TabPermRow,
 } from "@/lib/permissions";
@@ -71,7 +74,7 @@ function PermCell({
   who,
   onChange,
 }: {
-  tab: (typeof TABS)[number];
+  tab: TabDef;
   perms: PermMap;
   disabled?: boolean;
   who: string;
@@ -115,18 +118,76 @@ function PresetSelect({ disabled, onPick }: { disabled?: boolean; onPick: (p: Pr
   );
 }
 
-const TabHeadings = () => (
-  <>
-    {TABS.map((t) => (
-      <th key={t.key} className="whitespace-normal min-w-[96px]">
-        {t.label}
-      </th>
-    ))}
-  </>
-);
+/** Two heading rows: the module, then its tabs. */
+function ModuleHeadings({ tabs, lead = [], trail = 0 }: { tabs: TabDef[]; lead?: string[]; trail?: number }) {
+  const groups = MODULES.map((m) => ({ m, n: tabs.filter((t) => t.module === m.key).length })).filter((g) => g.n);
+  return (
+    <>
+      <tr>
+        {lead.map((l) => (
+          <th key={l} rowSpan={2}>
+            {l}
+          </th>
+        ))}
+        {groups.map((g) => (
+          <th key={g.m.key} colSpan={g.n} className="text-center border-l border-line">
+            {g.m.label}
+          </th>
+        ))}
+        {trail > 0 && <th rowSpan={2} colSpan={trail}></th>}
+      </tr>
+      <tr>
+        {tabs.map((t, i) => (
+          <th
+            key={t.key}
+            className={"whitespace-normal min-w-[96px]" + (i === 0 || tabs[i - 1].module !== t.module ? " border-l border-line" : "")}
+          >
+            {t.label}
+          </th>
+        ))}
+      </tr>
+    </>
+  );
+}
+
+/** Admin switch for the modules the company uses. */
+function ModulesPanel({
+  enabled,
+  busy,
+  onToggle,
+}: {
+  enabled: ModuleKey[];
+  busy: boolean;
+  onToggle: (m: ModuleKey, on: boolean) => void;
+}) {
+  return (
+    <div className="panel">
+      <h2 className="text-[15px] font-semibold m-0">Modules</h2>
+      <div className="note">
+        Modules this company uses. A module that is switched off is hidden from everyone, but its data and each
+        member’s access to its tabs are kept for when it is switched on again.
+      </div>
+      <div className="bar">
+        {MODULES.map((m) => (
+          <label key={m.key} className="inline-flex items-center gap-1.5 text-[13px] cursor-pointer" title={m.description}>
+            <input
+              type="checkbox"
+              checked={enabled.includes(m.key)}
+              disabled={busy}
+              onChange={(e) => onToggle(m.key, e.target.checked)}
+            />
+            {m.title}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function MembersView() {
-  const { supabase, company, user, isAdmin, loading: appLoading, flash } = useApp();
+  const { supabase, company, user, isAdmin, loading: appLoading, flash, enabledModules, reload } = useApp();
+  // Only the tabs of modules the company uses are shown; access on the others is kept as it is.
+  const tabs = useMemo(() => TABS.filter((t) => enabledModules.includes(t.module)), [enabledModules]);
   const [members, setMembers] = useState<Member[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [loading, setLoading] = useState(true);
@@ -163,6 +224,27 @@ export default function MembersView() {
 
   if (!appLoading && !isAdmin)
     return <div className="panel note">Only company admins can manage members.</div>;
+
+  async function toggleModule(m: ModuleKey, on: boolean) {
+    if (!company) return;
+    const def = MODULES.find((x) => x.key === m)!;
+    if (!on && !window.confirm(`Switch off ${def.title} for ${company.name}? It is hidden from everyone until switched on again.`))
+      return;
+    setBusy("modules");
+    const { error } = await supabase.rpc("set_company_module", { p_company: company.id, p_module: m, p_on: on });
+    setBusy(null);
+    if (error) {
+      flash(
+        "Could not change modules: " +
+          error.message +
+          (/schema cache|function/i.test(error.message) ? ". Run supabase/migrations/0023_modules.sql first." : ""),
+        true,
+      );
+      return;
+    }
+    await reload();
+    flash(`${def.title} is now switched ${on ? "on" : "off"} for ${company.name}.`);
+  }
 
   async function add(e: FormEvent) {
     e.preventDefault();
@@ -236,10 +318,12 @@ export default function MembersView() {
   }
 
   const setDraft = (id: string, d: Draft) => setDrafts((all) => ({ ...all, [id]: d }));
-  const COLS = TABS.length + 3;
+  const COLS = tabs.length + 3;
 
   return (
     <>
+      <ModulesPanel enabled={enabledModules} busy={busy === "modules"} onToggle={(m, on) => void toggleModule(m, on)} />
+
       <form className="panel" onSubmit={add}>
         <h2 className="text-[15px] font-semibold m-0">Add a member</h2>
         <div className="note">
@@ -287,13 +371,11 @@ export default function MembersView() {
           <div className="scroll">
             <table className="tbl">
               <thead>
-                <tr>
-                  <TabHeadings />
-                </tr>
+                <ModuleHeadings tabs={tabs} />
               </thead>
               <tbody>
                 <tr>
-                  {TABS.map((t) => (
+                  {tabs.map((t) => (
                     <td key={t.key}>
                       <PermCell
                         tab={t}
@@ -314,18 +396,13 @@ export default function MembersView() {
         V view, U upload, E edit, D delete. A tab without V is hidden and its data cannot be read. Upload covers
         uploading a month’s file or a document into an empty slot; edit covers inline edits, rows added by hand,
         return figures and IRD status; delete covers deleting rows, replacing or removing documents and re-uploading a
-        month that already holds data. Summary is view only; Return filing has no edit.
+        month that already holds data. Both Summaries are view only; Return filing has no edit; the TIEP Cancellation Ledger has no upload.
       </div>
 
       <div className="scroll">
         <table className="tbl">
           <thead>
-            <tr>
-              <th>Email</th>
-              <th>Role</th>
-              <TabHeadings />
-              <th></th>
-            </tr>
+            <ModuleHeadings tabs={tabs} lead={["Email", "Role"]} trail={1} />
           </thead>
           <tbody>
             {loading ? (
@@ -367,11 +444,11 @@ export default function MembersView() {
                       </select>
                     </td>
                     {d.role === "admin" ? (
-                      <td colSpan={TABS.length} className="note">
+                      <td colSpan={tabs.length} className="note">
                         Full access to every tab, and manages members.
                       </td>
                     ) : (
-                      TABS.map((t) => (
+                      tabs.map((t) => (
                         <td key={t.key}>
                           <PermCell
                             tab={t}

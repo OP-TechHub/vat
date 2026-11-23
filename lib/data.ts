@@ -17,7 +17,7 @@ import type {
   VatReturn,
 } from "./types";
 import { yearRange } from "./format";
-import type { TabPermRow } from "./permissions";
+import type { ModuleKey, TabPermRow } from "./permissions";
 
 const PAGE = 1000;
 
@@ -63,6 +63,13 @@ export async function loadAccess(
   if (member.error) throw new Error(member.error.message);
   if (perms.error) throw new Error(perms.error.message);
   return { role: (member.data?.role as Role) ?? null, perms: (perms.data ?? []) as TabPermRow[] };
+}
+
+/** Modules switched on for the company (migration 0023). */
+export async function loadModules(sb: Db, companyId: string): Promise<ModuleKey[]> {
+  const { data, error } = await sb.from("company_modules").select("module").eq("company_id", companyId);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => r.module as ModuleKey);
 }
 
 /**

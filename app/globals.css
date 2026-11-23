@@ -195,6 +195,10 @@ body {
   .tab[aria-current="page"] {
     @apply text-accent border-accent;
   }
+  /* Top-level module tabs (Registers | VAT | TIEP): larger than the tabs inside a module. */
+  .module-tab {
+    @apply px-4 text-[15px] font-semibold;
+  }
   .diff0 {
     @apply text-muted;
   }

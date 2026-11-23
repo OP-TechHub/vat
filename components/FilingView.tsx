@@ -293,7 +293,7 @@ export default function FilingView() {
       <div className="note">
         Period code is the IRD code for the taxable period, as on the return. Data uploaded is Yes when the
         period’s return figures are held; load the “VAT Return_Upload” workbook or enter figures on the{" "}
-        <Link href="/returns" className="underline">
+        <Link href="/vat/returns" className="underline">
           VAT reconciliation
         </Link>{" "}
         tab. Return and acknowledgement are Yes when a document (PDF or image, up to 25 MB) is held for the period;
