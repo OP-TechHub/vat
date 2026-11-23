@@ -166,6 +166,22 @@ vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
 vercel --prod
 ```
 
+## 6. Move the TIEP app's data (one time)
+
+The TIEP Import Register app's data was exported into `migration/tiep-export/` (git-ignored: business data). It holds the app's database collections, the embedded logbook (`lbdata.json`) and the stored files (`assets/`). `scripts/migrate-tiep.ts` moves it into this app.
+
+1. Run migrations 0023 to 0026 and switch TIEP on for the company (Members › Modules).
+2. In Registers, upload the CusDecs (Import Register) and the Business Central export sales list (Export Register) first. TIEP lines and invoices are then matched to them. Anything not matched is added by the move: such invoices do not reach VAT Export reconciliation, and such import lines keep TIEP's CusDec / invoice / item numbers.
+3. Dry run (reads only; prints the plan, quantity differences between TIEP and the Import Register, and a reconciliation of line count, quantities, suspended and outstanding LKR per material group):
+
+   ```bash
+   SUPABASE_SERVICE_ROLE_KEY=<service-role key> npx -y tsx scripts/migrate-tiep.ts --company <company uuid>
+   ```
+
+   In PowerShell: `$env:SUPABASE_SERVICE_ROLE_KEY="<key>"; npx -y tsx scripts/migrate-tiep.ts --company <uuid>`. The key is in Supabase → Project Settings → API; type it only into your own terminal, never into a file or the app. The company uuid is in `vat_claims.companies`.
+4. When the dry run looks right, run it again with `--apply`. It ends with the same reconciliation, now read back from the database; every row should show ✓. Running it again skips what was already moved (each row keeps its TIEP id in `legacy_id`). `--no-fill` leaves blank Import Register fields of matched CusDecs as they are (by default they are filled from TIEP).
+5. Stop using the TIEP app (keep it for reference). The logbook history becomes Completed postings with ref LOGBOOK; local-sales plans keep their refs (LS-B27 …) and batches.
+
 ## Uploads
 
 - **Ledger invoice list**: sheet named "Invoice Listing" (or the first sheet). Columns are matched by heading text anywhere in the first 15 rows: Invoice No. (or Document No.), Posting Date, Vendor Name, External Document No., Description, Amount (LCY), Source Currency Amount. Only rows posted in the chosen month are kept; duplicate invoice numbers are summed. Saving replaces that month's rows but keeps original-invoice marks and claimed-month overrides by invoice number.
