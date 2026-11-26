@@ -206,7 +206,11 @@ export default function TiepConfirmMappingView() {
             {!rows.length ? (
               <tr>
                 <td colSpan={7 + sts.length} className="note">
-                  {show === "nc" ? "Every export item no. is confirmed." : "No items match."}
+                  {!all.length
+                    ? "No export invoices in the Exports Register yet. Upload the Business Central export sales list in Registers › Export; its item nos. appear here."
+                    : show === "nc"
+                      ? "Every export item no. is confirmed."
+                      : "No items match."}
                 </td>
               </tr>
             ) : (
