@@ -41,7 +41,7 @@ export default function TiepGeneralView() {
     await reload();
   }
 
-  const w = perm.settings.edit;
+  const w = perm.general.edit;
   return (
     <div className="panel">
       <h2 className="text-[15px] font-semibold m-0">General</h2>

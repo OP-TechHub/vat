@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { GroupIndex } from "@/components/tiep/ui";
 
 export default function Page() {
-  redirect("/tiep/status/entries");
+  return <GroupIndex group="tiep_status" />;
 }

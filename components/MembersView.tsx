@@ -7,7 +7,9 @@ import {
   MODULES,
   NO_ACCESS,
   TABS,
+  groupDef,
   permMap,
+  tabTitle,
   presetRows,
   type Action,
   type ModuleKey,
@@ -89,7 +91,7 @@ function PermCell({
             type="checkbox"
             checked={perms[tab.key][f]}
             disabled={disabled}
-            aria-label={`${FLAG_LABEL[f]} on ${tab.label} for ${who}`}
+            aria-label={`${FLAG_LABEL[f]} on ${tabTitle(tab)} for ${who}`}
             onChange={(e) => onChange(setFlag(perms, tab.key, f, e.target.checked))}
           />
           {FLAG_LETTER[f]}
@@ -118,14 +120,25 @@ function PresetSelect({ disabled, onPick }: { disabled?: boolean; onPick: (p: Pr
   );
 }
 
-/** Two heading rows: the module, then its tabs. */
+/**
+ * Three heading rows: the module; its tabs, with TIEP Status and Settings spanning their sub-tabs; then the
+ * sub-tabs. A tab without sub-tabs spans the last two rows.
+ */
 function ModuleHeadings({ tabs, lead = [], trail = 0 }: { tabs: TabDef[]; lead?: string[]; trail?: number }) {
   const groups = MODULES.map((m) => ({ m, n: tabs.filter((t) => t.module === m.key).length })).filter((g) => g.n);
+  const edge = (i: number) => i === 0 || tabs[i - 1].module !== tabs[i].module;
+  // Second row: one cell per plain tab, one per run of sub-tabs of the same group.
+  const row2: { t: TabDef; span: number; i: number }[] = [];
+  tabs.forEach((t, i) => {
+    const last = row2[row2.length - 1];
+    if (t.group && last && last.t.group === t.group) last.span++;
+    else row2.push({ t, span: 1, i });
+  });
   return (
     <>
       <tr>
         {lead.map((l) => (
-          <th key={l} rowSpan={2}>
+          <th key={l} rowSpan={3}>
             {l}
           </th>
         ))}
@@ -134,17 +147,32 @@ function ModuleHeadings({ tabs, lead = [], trail = 0 }: { tabs: TabDef[]; lead?:
             {g.m.label}
           </th>
         ))}
-        {trail > 0 && <th rowSpan={2} colSpan={trail}></th>}
+        {trail > 0 && <th rowSpan={3} colSpan={trail}></th>}
       </tr>
       <tr>
-        {tabs.map((t, i) => (
-          <th
-            key={t.key}
-            className={"whitespace-normal min-w-[96px]" + (i === 0 || tabs[i - 1].module !== t.module ? " border-l border-line" : "")}
-          >
-            {t.label}
-          </th>
-        ))}
+        {row2.map(({ t, span, i }) =>
+          t.group ? (
+            <th key={t.group} colSpan={span} className="text-center border-l border-line">
+              {groupDef(t.group).label}
+            </th>
+          ) : (
+            <th key={t.key} rowSpan={2} className={"whitespace-normal min-w-[96px]" + (edge(i) ? " border-l border-line" : "")}>
+              {t.label}
+            </th>
+          ),
+        )}
+      </tr>
+      <tr>
+        {tabs.map((t, i) =>
+          t.group ? (
+            <th
+              key={t.key}
+              className={"whitespace-normal min-w-[96px] font-normal" + (edge(i) || tabs[i - 1].group !== t.group ? " border-l border-line" : "")}
+            >
+              {t.label}
+            </th>
+          ) : null,
+        )}
       </tr>
     </>
   );
@@ -396,7 +424,7 @@ export default function MembersView() {
         V view, U upload, E edit, D delete. A tab without V is hidden and its data cannot be read. Upload covers
         uploading a month’s file or a document into an empty slot; edit covers inline edits, rows added by hand,
         return figures and IRD status; delete covers deleting rows, replacing or removing documents and re-uploading a
-        month that already holds data. Both Summaries are view only; Return filing has no edit; the TIEP Cancellation Ledger has no upload.
+        month that already holds data. Both Summaries are view only; Return filing has no edit; the TIEP Cancellation Ledger has no upload. TIEP Status and Settings are set sub-tab by sub-tab; the tab shows when at least one of its sub-tabs is viewable.
       </div>
 
       <div className="scroll">

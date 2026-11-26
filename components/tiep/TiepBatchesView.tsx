@@ -89,7 +89,7 @@ export default function TiepBatchesView() {
   });
   const paid = bs.filter((b) => b.status === "Duty paid").length;
   const noRef = bs.filter((b) => !b.cancel_cusdec).length;
-  const canEdit = perm.status.edit;
+  const canEdit = perm.batches.edit;
 
   function toggle(id: string) {
     setOpen((s) => {

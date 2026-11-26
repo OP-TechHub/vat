@@ -77,7 +77,7 @@ export default function TiepStandardsView() {
             ))}
           </div>
           <span className="flex-1" />
-          {perm.settings.edit && (
+          {perm.standards.edit && (
             <>
               {x && (
                 <button className="btn" type="button" onClick={() => setEditing(x)}>
@@ -89,14 +89,14 @@ export default function TiepStandardsView() {
               </button>
             </>
           )}
-          {perm.settings.delete && x && (
+          {perm.standards.delete && x && (
             <button className="btn btn-danger" type="button" onClick={() => void remove(x)}>
               Delete
             </button>
           )}
         </div>
         {!x ? (
-          <p className="note m-0">No standards yet.{perm.settings.edit ? " Use Add standard to enter the approved standard." : ""}</p>
+          <p className="note m-0">No standards yet.{perm.standards.edit ? " Use Add standard to enter the approved standard." : ""}</p>
         ) : (
           <>
             <div className="flex flex-wrap gap-6 items-baseline text-[13px]">

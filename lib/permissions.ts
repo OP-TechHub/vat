@@ -27,12 +27,24 @@ export type TabKey =
   | "reg_local"
   // TIEP
   | "tiep_summary"
-  | "tiep_status"
   | "tiep_register"
   | "tiep_exports"
   | "tiep_local"
   | "tiep_ledger"
-  | "tiep_settings";
+  // TIEP Status sub-tabs (migration 0027)
+  | "tiep_status_entries"
+  | "tiep_status_cancels"
+  | "tiep_status_post"
+  | "tiep_status_local"
+  | "tiep_status_logbook"
+  // TIEP Settings sub-tabs (migration 0027)
+  | "tiep_settings_standards"
+  | "tiep_settings_items"
+  | "tiep_settings_tiep_items"
+  | "tiep_settings_confirm"
+  | "tiep_settings_mapmud"
+  | "tiep_settings_general"
+  | "tiep_settings_documents";
 
 export type Action = "upload" | "edit" | "delete";
 
@@ -86,12 +98,27 @@ export const MODULES: ModuleDef[] = [
   },
 ];
 
+/** A tab of the module bar that opens a strip of sub-tabs, each with its own permission. */
+export interface TabGroup {
+  key: "tiep_status" | "tiep_settings";
+  label: string;
+  /** Path prefix of its sub-tabs. */
+  base: string;
+}
+
+export const TAB_GROUPS: TabGroup[] = [
+  { key: "tiep_status", label: "TIEP Status", base: "/tiep/status" },
+  { key: "tiep_settings", label: "Settings", base: "/tiep/settings" },
+];
+
 export interface TabDef {
   key: TabKey;
   module: ModuleKey;
   href: string;
   label: string;
   actions: Action[];
+  /** Set on a sub-tab: the module-bar tab it sits under. */
+  group?: TabGroup["key"];
 }
 
 /**
@@ -114,12 +141,22 @@ export const TABS: TabDef[] = [
   { key: "submissions", module: "vat", href: "/vat/submissions", label: "Schedule submissions", actions: ["upload", "edit", "delete"] },
 
   { key: "tiep_summary", module: "tiep", href: "/tiep/summary", label: "Summary", actions: [] },
-  { key: "tiep_status", module: "tiep", href: "/tiep/status", label: "TIEP Status", actions: ["upload", "edit", "delete"] },
+  { key: "tiep_status_entries", module: "tiep", group: "tiep_status", href: "/tiep/status/entries", label: "By customs entry", actions: [] },
+  { key: "tiep_status_cancels", module: "tiep", group: "tiep_status", href: "/tiep/status/cancels", label: "By cancellation entry", actions: [] },
+  { key: "tiep_status_post", module: "tiep", group: "tiep_status", href: "/tiep/status/post", label: "Post cancellation", actions: ["edit"] },
+  { key: "tiep_status_local", module: "tiep", group: "tiep_status", href: "/tiep/status/local", label: "Local sales batches", actions: ["edit", "delete"] },
+  { key: "tiep_status_logbook", module: "tiep", group: "tiep_status", href: "/tiep/status/logbook", label: "Logbook check", actions: [] },
   { key: "tiep_register", module: "tiep", href: "/tiep/register", label: "Import Register", actions: ["upload", "edit", "delete"] },
   { key: "tiep_exports", module: "tiep", href: "/tiep/exports", label: "Exports Register", actions: ["upload", "edit", "delete"] },
   { key: "tiep_local", module: "tiep", href: "/tiep/local", label: "Local Sales Register", actions: ["upload", "edit", "delete"] },
   { key: "tiep_ledger", module: "tiep", href: "/tiep/ledger", label: "Cancellation Ledger", actions: ["edit", "delete"] },
-  { key: "tiep_settings", module: "tiep", href: "/tiep/settings", label: "Settings", actions: ["upload", "edit", "delete"] },
+  { key: "tiep_settings_standards", module: "tiep", group: "tiep_settings", href: "/tiep/settings/standards", label: "Conversion standards", actions: ["edit", "delete"] },
+  { key: "tiep_settings_items", module: "tiep", group: "tiep_settings", href: "/tiep/settings/items", label: "System items & mapping", actions: ["edit", "delete"] },
+  { key: "tiep_settings_tiep_items", module: "tiep", group: "tiep_settings", href: "/tiep/settings/tiep-items", label: "TIEP items", actions: ["edit", "delete"] },
+  { key: "tiep_settings_confirm", module: "tiep", group: "tiep_settings", href: "/tiep/settings/confirm-mapping", label: "Confirm export mapping", actions: ["edit"] },
+  { key: "tiep_settings_mapmud", module: "tiep", group: "tiep_settings", href: "/tiep/settings/mapping-vs-mud", label: "Item mapping vs MUD", actions: ["edit", "delete"] },
+  { key: "tiep_settings_general", module: "tiep", group: "tiep_settings", href: "/tiep/settings/general", label: "General", actions: ["edit"] },
+  { key: "tiep_settings_documents", module: "tiep", group: "tiep_settings", href: "/tiep/settings/documents", label: "Documents", actions: ["upload", "edit", "delete"] },
 ];
 
 export const ACTION_LABEL: Record<Action, string> = { upload: "Upload", edit: "Edit", delete: "Delete" };
@@ -131,6 +168,39 @@ export type PermMap = Record<TabKey, Perm>;
 
 export const moduleDef = (m: ModuleKey): ModuleDef => MODULES.find((x) => x.key === m)!;
 export const tabsOf = (m: ModuleKey): TabDef[] => TABS.filter((t) => t.module === m);
+export const groupDef = (g: TabGroup["key"]): TabGroup => TAB_GROUPS.find((x) => x.key === g)!;
+
+/** Full name of a tab: "TIEP Status › Post cancellation" for a sub-tab. */
+export const tabTitle = (t: TabDef): string => (t.group ? `${groupDef(t.group).label} › ${t.label}` : t.label);
+
+/** An entry of the module bar: a tab, or a group of sub-tabs opening at the first one the user may view. */
+export interface NavTab {
+  key: string;
+  href: string;
+  label: string;
+  /** Path prefix that marks the entry as current. */
+  base: string;
+}
+
+/** The module bar of a module for a user: tabs they may view; a group shows when they may view one of its sub-tabs. */
+export function navTabs(m: ModuleKey, perms: PermMap): NavTab[] {
+  const out: NavTab[] = [];
+  for (const t of tabsOf(m)) {
+    if (!perms[t.key].view) continue;
+    if (!t.group) {
+      out.push({ key: t.key, href: t.href, label: t.label, base: t.href });
+      continue;
+    }
+    if (out.some((x) => x.key === t.group)) continue;
+    const g = groupDef(t.group);
+    out.push({ key: g.key, href: t.href, label: g.label, base: g.base });
+  }
+  return out;
+}
+
+/** Sub-tabs of a group the user may view, in order. */
+export const groupTabs = (g: TabGroup["key"], perms: PermMap): TabDef[] =>
+  TABS.filter((t) => t.group === g && perms[t.key].view);
 
 /** Access per tab from the member's role and permission rows. */
 export function permMap(isAdmin: boolean, rows: TabPermRow[]): PermMap {

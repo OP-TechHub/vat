@@ -27,7 +27,7 @@ const fx0 = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 0 
 export default function TiepItemsView({ tab }: { tab: "sys" | "tiep" }) {
   const { supabase, company, user, flash } = useApp();
   const { skus, standards, perm, reload } = useTiep();
-  const w = perm.settings.edit;
+  const w = (tab === "tiep" ? perm.tiepItems.edit : perm.items.edit);
   const sts = useMemo(() => stdList(standards), [standards]);
   const prods = useMemo(() => allProducts(standards), [standards]);
   const [q, setQ] = useState("");
@@ -558,7 +558,7 @@ function SkuEditor({ item: x, onClose }: { item: SkuItem | null; onClose: () => 
       onClose={onClose}
       footer={
         <>
-          {x && perm.settings.delete && (
+          {x && perm.items.delete && (
             <button className="btn btn-danger mr-auto" type="button" onClick={() => void remove()}>
               Delete
             </button>
@@ -712,7 +712,7 @@ function TiepItemEditor({ name, onClose }: { name: string | null; onClose: () =>
       onClose={onClose}
       footer={
         <>
-          {name && perm.settings.edit && (
+          {name && perm.tiepItems.edit && perm.tiepItems.delete && (
             <button className="btn btn-danger mr-auto" type="button" onClick={() => void remove()}>
               Delete
             </button>
