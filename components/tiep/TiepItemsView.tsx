@@ -23,14 +23,13 @@ import {
 const STATUS_LABEL: Record<SkuItem["status"], string> = { confident: "Matched", review: "To review", none: "No TIEP item" };
 const fx0 = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 0 });
 
-/** Settings › TIEP Item Master: system items mapped to TIEP items, and the TIEP items with their yields. */
-export default function TiepItemsView() {
+/** Settings › System items & mapping (tab "sys") and Settings › TIEP items (tab "tiep"). */
+export default function TiepItemsView({ tab }: { tab: "sys" | "tiep" }) {
   const { supabase, company, user, flash } = useApp();
   const { skus, standards, perm, reload } = useTiep();
   const w = perm.settings.edit;
   const sts = useMemo(() => stdList(standards), [standards]);
   const prods = useMemo(() => allProducts(standards), [standards]);
-  const [tab, setTab] = useState<"sys" | "tiep">("sys");
   const [q, setQ] = useState("");
   const [st, setSt] = useState("");
   const [tp, setTp] = useState("");
@@ -212,43 +211,37 @@ export default function TiepItemsView() {
 
   return (
     <div className="panel">
-      <h2 className="text-[15px] font-semibold m-0">TIEP item master</h2>
-      <p className="note m-0">
-        System items are the items on invoices and sales lists (Business Central item no. and description). Each one is
-        mapped to a TIEP item, the product as listed in the TIEP approval; the TIEP item’s yield converts the quantity sold
-        back to whole (round) fish. System items with no TIEP item (by-products, charges, non-fish) are left out of the
-        consumption.
-      </p>
+      <h2 className="text-[15px] font-semibold m-0">{tab === "tiep" ? "TIEP items" : "System items & mapping"}</h2>
+      {tab === "tiep" ? (
+        <p className="note m-0">
+          TIEP items are the products as listed in the TIEP approval, with their yield under each conversion standard. The
+          yield converts the quantity sold back to whole (round) fish. Edits apply across all standards.
+        </p>
+      ) : (
+        <p className="note m-0">
+          System items are the items on invoices and sales lists (Business Central item no. and description). Each one is
+          mapped to a TIEP item, the product as listed in the TIEP approval; the TIEP item’s yield converts the quantity sold
+          back to whole (round) fish. System items with no TIEP item (by-products, charges, non-fish) are left out of the
+          consumption.
+        </p>
+      )}
       <Tiles
-        items={[
-          { k: "System items", v: fx0(skus.length) },
-          { k: "Matched", v: fx0(cnt.confident) },
-          { k: "To review", v: fx0(cnt.review), tone: cnt.review ? "w" : "" },
-          { k: "No TIEP item", v: fx0(cnt.none) },
-          { k: "Not mapped yet", v: fx0(cnt.unmapped), tone: cnt.unmapped ? "w" : "" },
-          { k: "Item nos. confirmed", v: fx0(new Set(skus.filter(isConf).map((x) => x.code || x.id)).size) },
-          { k: "TIEP items", v: fx0(prods.length) },
-          { k: "Not in every standard", v: fx0(missing), tone: missing ? "b" : "" },
-        ]}
+        items={
+          tab === "tiep"
+            ? [
+                { k: "TIEP items", v: fx0(prods.length) },
+                { k: "Not in every standard", v: fx0(missing), tone: missing ? "b" : "" },
+              ]
+            : [
+                { k: "System items", v: fx0(skus.length) },
+                { k: "Matched", v: fx0(cnt.confident) },
+                { k: "To review", v: fx0(cnt.review), tone: cnt.review ? "w" : "" },
+                { k: "No TIEP item", v: fx0(cnt.none) },
+                { k: "Not mapped yet", v: fx0(cnt.unmapped), tone: cnt.unmapped ? "w" : "" },
+                { k: "Item nos. confirmed", v: fx0(new Set(skus.filter(isConf).map((x) => x.code || x.id)).size) },
+              ]
+        }
       />
-      <div className="inline-flex border border-line rounded-md overflow-hidden w-fit" role="group" aria-label="List to show">
-        {(
-          [
-            ["sys", "System items & mapping"],
-            ["tiep", "TIEP items"],
-          ] as const
-        ).map(([k, l]) => (
-          <button
-            key={k}
-            type="button"
-            aria-pressed={tab === k}
-            onClick={() => setTab(k)}
-            className={"px-3 py-1.5 text-[13px] border-l border-line first:border-l-0 " + (tab === k ? "bg-accent text-accent-ink" : "bg-surface text-muted")}
-          >
-            {l}
-          </button>
-        ))}
-      </div>
 
       {tab === "tiep" ? (
         <TiepItems onEdit={setEditTiep} canEdit={w} />

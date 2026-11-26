@@ -493,7 +493,7 @@ export default function MudDialog({ subject: s, onClose }: { subject: MudSubject
           </tbody>
         </table>
       </div>
-      {!M.rows1.length && <div className="msg msg-err">No sales line of this invoice has a TIEP item with a yield in the standard: map its items in Settings › TIEP item master.</div>}
+      {!M.rows1.length && <div className="msg msg-err">No sales line of this invoice has a TIEP item with a yield in the standard: map its items in Settings › System items &amp; mapping.</div>}
 
       <p className="note m-0">
         Quantities claimed are rounded to whole units (at least 1), as on the submitted MUD. Lines are proposed FIFO from open import lines of the same
@@ -676,7 +676,7 @@ function MudFormView({
     >
       {unconfirmed.size > 0 && (
         <div className="msg msg-err">
-          Item mapping not confirmed in the TIEP item master for: {[...unconfirmed].join(", ")}. These lines print as NOT CONFIRMED; confirm the item nos.
+          Item mapping not confirmed for: {[...unconfirmed].join(", ")}. These lines print as NOT CONFIRMED; confirm the item nos.
           in Settings › Confirm export mapping.
         </div>
       )}

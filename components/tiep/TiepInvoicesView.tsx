@@ -237,7 +237,7 @@ export default function TiepInvoicesView({ type }: { type: "Export" | "Local" })
         <Link href={type === "Export" ? "/registers/exports" : "/registers/local-sales"} className="underline">
           Registers › {type === "Export" ? "Export Register" : "Local Sales Register"}
         </Link>
-        . Each one is calculated here from the conversion standard for its date and the TIEP item master.
+        . Each one is calculated here from the conversion standard for its date and the system item mapping.
       </div>
       <Tiles
         items={[
