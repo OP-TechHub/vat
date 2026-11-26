@@ -21,3 +21,4 @@ custom/
 
 # Data exported from the TIEP app for the one-time move (business data, never committed)
 /migration/
+/TIEP_migration_pack_*/
