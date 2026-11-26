@@ -5,7 +5,7 @@
 import type { Db } from "./supabase/schema";
 import { DOC_LABEL } from "./documents";
 import { mLabel, monthKey } from "./format";
-import { TABS, moduleDef } from "./permissions";
+import { TABS, moduleDef, tabTitle } from "./permissions";
 import { periodLabel } from "./submissions";
 import type { DocumentKind } from "./types";
 
@@ -63,10 +63,13 @@ export const PAGE_SIZE = 100;
 /** Tab names, including Members, which has no entry in TABS. */
 export function tabLabel(tab: string): string {
   if (tab === "members") return "Members";
+  // Entries logged before TIEP Status and Settings had per-sub-tab permissions (migration 0027).
+  if (tab === "tiep_status") return "TIEP › TIEP Status";
+  if (tab === "tiep_settings") return "TIEP › Settings";
   const t = TABS.find((x) => x.key === tab);
   if (!t) return tab;
   // Registers and TIEP reuse VAT tab names (Import Register), so name their module too.
-  return t.module === "vat" ? t.label : `${moduleDef(t.module).label} › ${t.label}`;
+  return t.module === "vat" ? t.label : `${moduleDef(t.module).label} › ${tabTitle(t)}`;
 }
 
 export const LOG_TABS: string[] = [...TABS.filter((t) => t.actions.length > 0).map((t) => t.key as string), "members"];

@@ -120,7 +120,7 @@ export default function TiepPostView() {
     await reload();
   }
 
-  if (!perm.status.edit)
+  if (!perm.post.edit)
     return <div className="panel note">Posting a cancellation needs edit permission on TIEP Status.</div>;
 
   return (

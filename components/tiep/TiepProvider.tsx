@@ -33,9 +33,19 @@ export interface TiepState extends TiepData {
   reload: () => Promise<void>;
   perm: {
     register: Perm;
-    status: Perm;
     ledger: Perm;
-    settings: Perm;
+    /** TIEP Status › Post cancellation. */
+    post: Perm;
+    /** TIEP Status › Local sales batches. */
+    batches: Perm;
+    /** Settings sub-tabs. */
+    standards: Perm;
+    items: Perm;
+    tiepItems: Perm;
+    confirm: Perm;
+    mapmud: Perm;
+    general: Perm;
+    documents: Perm;
     exports: Perm;
     local: Perm;
   };
@@ -132,9 +142,18 @@ export default function TiepProvider({ children }: { children: ReactNode }) {
     reload,
     perm: {
       register: perm("tiep_register"),
-      status: perm("tiep_status"),
       ledger: perm("tiep_ledger"),
-      settings: perm("tiep_settings"),
+      // TIEP Status sub-tabs
+      post: perm("tiep_status_post"),
+      batches: perm("tiep_status_local"),
+      // Settings sub-tabs
+      standards: perm("tiep_settings_standards"),
+      items: perm("tiep_settings_items"),
+      tiepItems: perm("tiep_settings_tiep_items"),
+      confirm: perm("tiep_settings_confirm"),
+      mapmud: perm("tiep_settings_mapmud"),
+      general: perm("tiep_settings_general"),
+      documents: perm("tiep_settings_documents"),
       exports: perm("tiep_exports"),
       local: perm("tiep_local"),
     },

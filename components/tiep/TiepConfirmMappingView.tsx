@@ -43,7 +43,7 @@ const stdsMissing = (standards: Standard[], tiep: string) =>
 export default function TiepConfirmMappingView() {
   const { supabase, user, flash } = useApp();
   const { skus, standards, invoices, perm, reload } = useTiep();
-  const w = perm.settings.edit;
+  const w = perm.confirm.edit;
   const [show, setShow] = useState<"nc" | "conf" | "nofish" | "all">("nc");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState<Set<string>>(new Set());

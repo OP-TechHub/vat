@@ -277,7 +277,7 @@ export default function TiepInvoicesView({ type }: { type: "Export" | "Local" })
         <button className="btn" type="button" onClick={csv}>
           Download CSV
         </button>
-        {perm.settings.edit && (
+        {perm.general.edit && (
           <button className="btn" type="button" onClick={() => setCfgOpen(true)}>
             MUD form settings
           </button>

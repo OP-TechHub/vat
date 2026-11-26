@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { LineStatus, Req, TiepLine } from "@/lib/tiep/model";
+import { useApp } from "@/components/AppShell";
+import { TABS, type TabGroup } from "@/lib/permissions";
 
 const nf0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const nf2 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -89,6 +91,25 @@ export function SubNav({ items }: { items: { href: string; label: string }[] }) 
       })}
     </nav>
   );
+}
+
+/** Sub-tab strip of TIEP Status or Settings: the sub-tabs the user may view. */
+export function GroupSubNav({ group }: { group: TabGroup["key"] }) {
+  const { perm } = useApp();
+  const items = TABS.filter((t) => t.group === group && perm(t.key).view).map((t) => ({ href: t.href, label: t.label }));
+  return <SubNav items={items} />;
+}
+
+/** Index page of TIEP Status or Settings: opens the first sub-tab the user may view. */
+export function GroupIndex({ group }: { group: TabGroup["key"] }) {
+  const { perm, loading } = useApp();
+  const router = useRouter();
+  const first = TABS.find((t) => t.group === group && perm(t.key).view);
+  useEffect(() => {
+    if (first) router.replace(first.href);
+  }, [first, router]);
+  if (loading || first) return null;
+  return <div className="panel note">You have no access to any part of this tab. Ask a company admin to give you access.</div>;
 }
 
 /** A modal dialog, open while mounted. */

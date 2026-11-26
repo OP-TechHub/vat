@@ -15,7 +15,7 @@ const ACCEPT = ".pdf,.png,.jpg,.jpeg,application/pdf,image/*";
 export default function TiepDocumentsView() {
   const { supabase, flash } = useApp();
   const { documents, standards, asAt, perm } = useTiep();
-  const w = perm.settings.edit;
+  const w = perm.documents.edit;
   const [edit, setEdit] = useState<TiepDocument | "new" | null>(null);
   const stdOf = useMemo(() => new Map(standards.map((s) => [s.id, s])), [standards]);
   const list = useMemo(() => [...documents].sort((a, b) => String(b.doc_date ?? "").localeCompare(String(a.doc_date ?? ""))), [documents]);
@@ -175,7 +175,7 @@ function DocEditor({ doc: d, onClose }: { doc: TiepDocument | null; onClose: () 
   const { supabase, company, user, flash } = useApp();
   const { standards, perm, reload } = useTiep();
   const sts = stdList(standards);
-  const canUpload = perm.settings.upload;
+  const canUpload = perm.documents.upload;
   const [title, setTitle] = useState(d?.title ?? "");
   const [kind, setKind] = useState<TiepDocument["kind"]>(d?.kind ?? "TIEP approval");
   const [date, setDate] = useState(d?.doc_date ?? "");
@@ -244,7 +244,7 @@ function DocEditor({ doc: d, onClose }: { doc: TiepDocument | null; onClose: () 
       onClose={onClose}
       footer={
         <>
-          {d && perm.settings.delete && (
+          {d && perm.documents.delete && (
             <button className="btn btn-danger mr-auto" type="button" onClick={() => void remove()}>
               Delete
             </button>

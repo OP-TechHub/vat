@@ -28,6 +28,7 @@ import {
   NO_ACCESS,
   moduleDef,
   moduleOfPath,
+  navTabs,
   permMap,
   tabOfPath,
   tabsOf,
@@ -291,7 +292,7 @@ export default function AppShell({
   const perm = useCallback((tab: TabKey) => perms[tab] ?? NO_ACCESS, [perms]);
   const modules = useMemo(() => visibleModules(enabledModules, perms), [enabledModules, perms]);
   const firstTabOf = (m: ModuleKey) => tabsOf(m).find((t) => perms[t.key].view);
-  const moduleTabs = currentModule ? tabsOf(currentModule).filter((t) => perms[t.key].view) : [];
+  const moduleTabs = currentModule ? navTabs(currentModule, perms) : [];
   const currentTab = tabOfPath(pathname);
   const moduleOff = !loading && !!company && currentModule != null && !enabledModules.includes(currentModule);
   const blocked = !loading && !!company && !moduleOff && currentTab != null && !perms[currentTab].view;
@@ -440,7 +441,7 @@ export default function AppShell({
         {currentModule && moduleTabs.length > 0 && !moduleOff && (
           <nav className="flex flex-wrap gap-1 border-b border-line -mt-2" aria-label={`${moduleDef(currentModule).label} tabs`}>
             {moduleTabs.map((t) => (
-              <Link key={t.href} href={t.href} className="tab" aria-current={here(t.href) ? "page" : undefined}>
+              <Link key={t.key} href={t.href} className="tab" aria-current={here(t.base) ? "page" : undefined}>
                 {t.label}
               </Link>
             ))}

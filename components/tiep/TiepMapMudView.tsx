@@ -103,7 +103,7 @@ const byDateMud = (a: MudHist, b: MudHist) => String(a.mud_date ?? "").localeCom
 export default function TiepMapMudView() {
   const { supabase, user, flash } = useApp();
   const { skus, standards, invoices, mudhist, asAt, perm, reload } = useTiep();
-  const w = perm.settings.edit;
+  const w = perm.mapmud.edit;
   const [q, setQ] = useState("");
   const [sh, setSh] = useState<"code" | "mud" | "all">("code");
   const [cf, setCf] = useState<"" | "yes" | "no">("");
@@ -534,7 +534,7 @@ function MudLineEditor({ line: m, onClose }: { line: MudHist | null; onClose: ()
       onClose={onClose}
       footer={
         <>
-          {m && perm.settings.delete && (
+          {m && perm.mapmud.delete && (
             <button className="btn btn-danger mr-auto" type="button" onClick={() => void remove()}>
               Delete
             </button>
