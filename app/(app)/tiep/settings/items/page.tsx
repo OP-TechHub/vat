@@ -1,5 +1,5 @@
 import TiepItemsView from "@/components/tiep/TiepItemsView";
 
 export default function Page() {
-  return <TiepItemsView />;
+  return <TiepItemsView tab="sys" />;
 }
