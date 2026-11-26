@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { useApp } from "./AppShell";
 import { DocActions, DocHeading } from "./DocActions";
 import CellInput from "./CellInput";
+import { Modal } from "./tiep/ui";
 import { ClearFilters, FilterRow, useColumnFilters, type ColumnSpec } from "./ColumnFilters";
 import { fmt, mLabel, monthKey, monthsBetween, periodCode, sum } from "@/lib/format";
 import { loadIrdStatus, type IrdStatusData } from "@/lib/data";
@@ -52,6 +53,19 @@ const IRD_COLUMNS: ColumnSpec[] = [
   { key: "updated", label: "Last updated" },
 ];
 
+/** A remark on a taxable period (ird_status_comments, migration 0028). */
+interface PeriodComment {
+  id: string;
+  return_month: string;
+  body: string;
+  created_at: string;
+  author_email: string | null;
+}
+
+/** "11 Nov 2026, 14:05" from an ISO time. */
+const timeLabel = (iso: string) =>
+  new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
 /** "11 Nov 2026" from an ISO time. */
 const dayLabel = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
@@ -69,6 +83,36 @@ export default function IrdStatusView() {
   const [manage, setManage] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const target = useRef<string | null>(null);
+  // Comments per period, newest first; null until loaded. Without migration 0028 the remark stays one free-text box.
+  const [comments, setComments] = useState<PeriodComment[] | null>(null);
+  const [noComments, setNoComments] = useState(false);
+  const [thread, setThread] = useState<string | null>(null); // month whose comments are open
+
+  const loadComments = useCallback(async () => {
+    if (!company) return setComments([]);
+    const { data: rows, error: err } = await supabase
+      .from("ird_status_comments")
+      .select("id,return_month,body,created_at,author_email")
+      .eq("company_id", company.id)
+      .order("created_at", { ascending: false })
+      .range(0, 9999);
+    if (err) {
+      setNoComments(/schema cache|does not exist|not find/i.test(err.message));
+      setComments([]);
+      return;
+    }
+    setNoComments(false);
+    setComments((rows as PeriodComment[]) ?? []);
+  }, [supabase, company]);
+
+  const commentsOf = useMemo(() => {
+    const by = new Map<string, PeriodComment[]>();
+    for (const c of comments ?? []) {
+      const k = monthKey(c.return_month);
+      by.set(k, [...(by.get(k) ?? []), c]);
+    }
+    return by;
+  }, [comments]);
 
   const load = useCallback(async () => {
     if (!company) {
@@ -76,14 +120,15 @@ export default function IrdStatusView() {
       return;
     }
     try {
-      setData(await loadIrdStatus(supabase, company.id));
+      const [d] = await Promise.all([loadIrdStatus(supabase, company.id), loadComments()]);
+      setData(d);
       setError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load the IRD status register.";
       setError(isMissingTable(e) ? `${msg}. Run supabase/migrations/0007_ird_status.sql in the Supabase SQL Editor.` : msg);
       setData({ returns: [], statuses: [], vouchers: [], options: [] });
     }
-  }, [supabase, company]);
+  }, [supabase, company, loadComments]);
 
   useEffect(() => {
     setData(null);
@@ -263,6 +308,29 @@ export default function IrdStatusView() {
 
   return (
     <>
+      {thread && company && (
+        <CommentsDialog
+          month={thread}
+          comments={commentsOf.get(thread) ?? []}
+          canAdd={p.edit}
+          canDelete={p.delete}
+          onClose={() => setThread(null)}
+          onAdd={async (body) => {
+            const { error: err } = await supabase
+              .from("ird_status_comments")
+              .insert({ company_id: company.id, return_month: thread + "-01", body, created_by: user.id });
+            if (err) return err.message;
+            await load();
+            return null;
+          }}
+          onDelete={async (c) => {
+            const { error: err } = await supabase.from("ird_status_comments").delete().eq("id", c.id);
+            if (err) return err.message;
+            await load();
+            return null;
+          }}
+        />
+      )}
       <input ref={fileRef} type="file" accept={DOC_ACCEPT} className="hidden" onChange={(e) => void onFile(e)} />
 
       <div className="bar">
@@ -451,7 +519,25 @@ export default function IrdStatusView() {
                         />
                       </td>
                       <td className="wrapc text-xs min-w-[200px]">
-                        {p.edit ? (
+                        {!noComments ? (
+                          <div className="flex items-start gap-2">
+                            <span className="flex-1">{r.remarks ?? <span className="text-muted">—</span>}</span>
+                            {(p.edit || (commentsOf.get(r.month)?.length ?? 0) > 0) && (
+                              <button
+                                type="button"
+                                className="btn py-0 px-1.5 text-[12px] whitespace-nowrap"
+                                onClick={() => setThread(r.month)}
+                                title={`Comments for ${mLabel(r.month)}`}
+                                aria-label={`Comments for ${mLabel(r.month)}: ${commentsOf.get(r.month)?.length ?? 0}`}
+                              >
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="inline -mt-0.5">
+                                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                </svg>
+                                {(commentsOf.get(r.month)?.length ?? 0) > 0 ? ` ${commentsOf.get(r.month)!.length}` : " +"}
+                              </button>
+                            )}
+                          </div>
+                        ) : p.edit ? (
                           <CellInput
                             key={r.month + ":" + (r.remarks ?? "")}
                             value={r.remarks ?? ""}
@@ -494,10 +580,109 @@ export default function IrdStatusView() {
         input tax on imports and other purchases (8) and on suspended purchases (8A), plus monthly payments (Q), highlighted when
         negative. Status, voucher date and value are entered here; the date, value and attachment open
         once the status is “Credit voucher received”. Vouchers are kept with the returns in the vat-claims bucket. Remarks
-        are free text, saved when you leave the box or press Enter. Rows are listed last updated first (a change to the
+        are a list of comments per period: the Remarks column shows the latest, and the comment button opens them all
+        (who wrote each one and when) and adds a new one. Edit permission adds comments; delete permission removes them. Rows are listed last updated first (a change to the
         status, voucher, remarks or voucher file), then newest period first; switch Order to list them by period only.
       </div>
     </>
+  );
+}
+
+/** All comments of a period, newest first, with a box to add one. */
+function CommentsDialog({
+  month,
+  comments,
+  canAdd,
+  canDelete,
+  onClose,
+  onAdd,
+  onDelete,
+}: {
+  month: string;
+  comments: PeriodComment[];
+  canAdd: boolean;
+  canDelete: boolean;
+  onClose: () => void;
+  /** Returns an error message, or null when saved. */
+  onAdd: (body: string) => Promise<string | null>;
+  onDelete: (c: PeriodComment) => Promise<string | null>;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function add() {
+    const body = text.trim();
+    if (!body) return;
+    setBusy(true);
+    const err = await onAdd(body);
+    setBusy(false);
+    if (err) return setMsg("Could not add the comment: " + err);
+    setMsg(null);
+    setText("");
+  }
+
+  async function remove(c: PeriodComment) {
+    if (!window.confirm("Delete this comment?")) return;
+    setBusy(true);
+    const err = await onDelete(c);
+    setBusy(false);
+    setMsg(err ? "Could not delete the comment: " + err : null);
+  }
+
+  return (
+    <Modal title={`Remarks · ${mLabel(month)} (${periodCode(month)})`} onClose={onClose}>
+      {canAdd && (
+        <div className="flex flex-col gap-2">
+          <textarea
+            className="control min-h-[72px]"
+            value={text}
+            maxLength={2000}
+            disabled={busy}
+            placeholder="Add a comment"
+            aria-label={`New comment for ${mLabel(month)}`}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void add();
+            }}
+          />
+          <div className="flex items-center gap-2">
+            <button className="btn btn-primary" type="button" disabled={busy || !text.trim()} onClick={() => void add()}>
+              {busy ? "Saving…" : "Add comment"}
+            </button>
+            <span className="note">The latest comment shows in the Remarks column. Ctrl+Enter adds it.</span>
+          </div>
+        </div>
+      )}
+      {msg && <div className="msg msg-err">{msg}</div>}
+      {comments.length ? (
+        <ol className="flex flex-col gap-3 m-0 p-0 list-none">
+          {comments.map((c, i) => (
+            <li key={c.id} className="border-l-2 pl-3" style={{ borderColor: i === 0 ? "var(--accent)" : "var(--line)" }}>
+              <div className="flex items-center gap-2 text-[12px] text-muted">
+                <span>{c.author_email ?? "Unknown user"}</span>
+                <span>·</span>
+                <span>{timeLabel(c.created_at)}</span>
+                {i === 0 && <span className="pill pill-info">Latest</span>}
+                {canDelete && (
+                  <button
+                    type="button"
+                    className="ml-auto text-[12px] underline text-muted"
+                    disabled={busy}
+                    onClick={() => void remove(c)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+              <div className="whitespace-pre-wrap text-[13px] mt-0.5">{c.body}</div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="note">No comments yet.</div>
+      )}
+    </Modal>
   );
 }
 
